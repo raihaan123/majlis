@@ -1,0 +1,154 @@
+import type Database from 'better-sqlite3';
+
+/**
+ * Migration system using user_version pragma — no migration table needed.
+ * Each migration is an array index: migration[0] upgrades from version 0 to 1, etc.
+ */
+
+type Migration = (db: Database.Database) => void;
+
+const migrations: Migration[] = [
+  // Migration 001: v0 → v1 — All 9 tables from PRD v2 §4.2
+  (db) => {
+    db.exec(`
+      CREATE TABLE experiments (
+        id INTEGER PRIMARY KEY,
+        slug TEXT UNIQUE NOT NULL,
+        branch TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'classified',
+        classification_ref TEXT,
+        sub_type TEXT,
+        hypothesis TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE decisions (
+        id INTEGER PRIMARY KEY,
+        experiment_id INTEGER REFERENCES experiments(id),
+        description TEXT NOT NULL,
+        evidence_level TEXT NOT NULL CHECK(
+          evidence_level IN ('proof', 'test', 'strong_consensus',
+                             'consensus', 'analogy', 'judgment')
+        ),
+        justification TEXT NOT NULL,
+        status TEXT DEFAULT 'active' CHECK(
+          status IN ('active', 'overturned', 'superseded')
+        ),
+        overturned_by INTEGER REFERENCES decisions(id),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE metrics (
+        id INTEGER PRIMARY KEY,
+        experiment_id INTEGER REFERENCES experiments(id),
+        phase TEXT NOT NULL CHECK(phase IN ('before', 'after')),
+        fixture TEXT NOT NULL,
+        metric_name TEXT NOT NULL,
+        metric_value REAL NOT NULL,
+        captured_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE dead_ends (
+        id INTEGER PRIMARY KEY,
+        experiment_id INTEGER REFERENCES experiments(id),
+        approach TEXT NOT NULL,
+        why_failed TEXT NOT NULL,
+        structural_constraint TEXT NOT NULL,
+        sub_type TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE verifications (
+        id INTEGER PRIMARY KEY,
+        experiment_id INTEGER REFERENCES experiments(id),
+        component TEXT NOT NULL,
+        grade TEXT NOT NULL CHECK(
+          grade IN ('sound', 'good', 'weak', 'rejected')
+        ),
+        provenance_intact BOOLEAN,
+        content_correct BOOLEAN,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE doubts (
+        id INTEGER PRIMARY KEY,
+        experiment_id INTEGER REFERENCES experiments(id),
+        claim_doubted TEXT NOT NULL,
+        evidence_level_of_claim TEXT NOT NULL,
+        evidence_for_doubt TEXT NOT NULL,
+        severity TEXT NOT NULL CHECK(severity IN ('minor', 'moderate', 'critical')),
+        resolution TEXT CHECK(resolution IN ('confirmed', 'dismissed', 'inconclusive')),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE sub_type_failures (
+        sub_type TEXT NOT NULL,
+        experiment_id INTEGER REFERENCES experiments(id),
+        grade TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE sessions (
+        id INTEGER PRIMARY KEY,
+        intent TEXT NOT NULL,
+        experiment_id INTEGER REFERENCES experiments(id),
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        ended_at DATETIME,
+        accomplished TEXT,
+        unfinished TEXT,
+        new_fragility TEXT
+      );
+
+      CREATE TABLE compressions (
+        id INTEGER PRIMARY KEY,
+        session_count_since_last INTEGER,
+        synthesis_size_before INTEGER,
+        synthesis_size_after INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX idx_decisions_evidence ON decisions(evidence_level);
+      CREATE INDEX idx_decisions_experiment ON decisions(experiment_id);
+      CREATE INDEX idx_metrics_experiment ON metrics(experiment_id, fixture);
+      CREATE INDEX idx_dead_ends_sub_type ON dead_ends(sub_type);
+      CREATE INDEX idx_sub_type_failures ON sub_type_failures(sub_type);
+    `);
+  },
+
+  // Migration 002: v1 → v2 — Add builder_guidance column to experiments
+  (db) => {
+    db.exec(`
+      ALTER TABLE experiments ADD COLUMN builder_guidance TEXT;
+    `);
+  },
+
+  // Migration 003: v2 → v3 — Add challenges table
+  (db) => {
+    db.exec(`
+      CREATE TABLE challenges (
+        id INTEGER PRIMARY KEY,
+        experiment_id INTEGER REFERENCES experiments(id),
+        description TEXT NOT NULL,
+        reasoning TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX idx_challenges_experiment ON challenges(experiment_id);
+    `);
+  },
+];
+
+/**
+ * Run all pending migrations. Uses user_version pragma for tracking.
+ */
+export function runMigrations(db: Database.Database): void {
+  const currentVersion = db.pragma('user_version', { simple: true }) as number;
+
+  for (let i = currentVersion; i < migrations.length; i++) {
+    db.transaction(() => {
+      migrations[i](db);
+      db.pragma(`user_version = ${i + 1}`);
+    })();
+  }
+}

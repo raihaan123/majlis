@@ -1,0 +1,45 @@
+{
+  "name": "majlis",
+  "version": "0.1.0",
+  "description": "Multi-agent workflow CLI for structured doubt, independent verification, and compressed knowledge",
+  "bin": {
+    "majlis": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "tsx --test src/test/*.test.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.5.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/raihaan123/majlis"
+  },
+  "keywords": [
+    "claude-code",
+    "multi-agent",
+    "verification",
+    "state-machine",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "type": "commonjs",
+  "homepage": "https://github.com/raihaan123/majlis#readme",
+  "bugs": {
+    "url": "https://github.com/raihaan123/majlis/issues"
+  }
+}

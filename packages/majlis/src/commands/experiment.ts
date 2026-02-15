@@ -1,0 +1,158 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { execSync } from 'node:child_process';
+import { getDb, findProjectRoot } from '../db/connection.js';
+import {
+  createExperiment,
+  getExperimentBySlug,
+  getLatestExperiment,
+  updateExperimentStatus,
+  insertDeadEnd,
+} from '../db/queries.js';
+import type { MajlisConfig } from '../types.js';
+import * as fmt from '../output/format.js';
+
+export async function newExperiment(args: string[]): Promise<void> {
+  const root = findProjectRoot();
+  if (!root) throw new Error('Not in a Majlis project. Run `majlis init` first.');
+
+  const hypothesis = args.filter(a => !a.startsWith('--')).join(' ');
+  if (!hypothesis) {
+    throw new Error('Usage: majlis new "hypothesis"');
+  }
+
+  const db = getDb(root);
+  const config = loadConfig(root);
+
+  // Generate slug from hypothesis
+  const slug = slugify(hypothesis);
+
+  // Check for duplicates
+  if (getExperimentBySlug(db, slug)) {
+    throw new Error(`Experiment with slug "${slug}" already exists.`);
+  }
+
+  // Determine experiment number
+  const allExps = db.prepare('SELECT COUNT(*) as count FROM experiments').get() as { count: number };
+  const num = allExps.count + 1;
+  const paddedNum = String(num).padStart(3, '0');
+
+  // Create git branch
+  const branch = `exp/${paddedNum}-${slug}`;
+  try {
+    execSync(`git checkout -b ${branch}`, {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    fmt.info(`Created branch: ${branch}`);
+  } catch (err) {
+    fmt.warn(`Could not create branch ${branch} — continuing without git branch.`);
+  }
+
+  // Parse optional flags
+  const subTypeIdx = args.indexOf('--sub-type');
+  const subType = subTypeIdx >= 0 ? args[subTypeIdx + 1] : null;
+
+  // Create DB entry
+  const exp = createExperiment(db, slug, branch, hypothesis, subType, null);
+  fmt.success(`Created experiment #${exp.id}: ${exp.slug}`);
+
+  // Create experiment log from template
+  const docsDir = path.join(root, 'docs', 'experiments');
+  const templatePath = path.join(docsDir, '_TEMPLATE.md');
+  if (fs.existsSync(templatePath)) {
+    const template = fs.readFileSync(templatePath, 'utf-8');
+    const logContent = template
+      .replace(/\{\{title\}\}/g, hypothesis)
+      .replace(/\{\{hypothesis\}\}/g, hypothesis)
+      .replace(/\{\{branch\}\}/g, branch)
+      .replace(/\{\{status\}\}/g, 'classified')
+      .replace(/\{\{sub_type\}\}/g, subType ?? 'unclassified')
+      .replace(/\{\{date\}\}/g, new Date().toISOString().split('T')[0]);
+    const logPath = path.join(docsDir, `${paddedNum}-${slug}.md`);
+    fs.writeFileSync(logPath, logContent);
+    fmt.info(`Created experiment log: docs/experiments/${paddedNum}-${slug}.md`);
+  }
+
+  // Auto-baseline if configured
+  if (config.cycle.auto_baseline_on_new_experiment && config.metrics.command) {
+    fmt.info('Auto-baselining... (run `majlis baseline` to do this manually)');
+    try {
+      const { baseline } = await import('./measure.js');
+      await baseline(['--experiment', String(exp.id)]);
+    } catch (err) {
+      fmt.warn('Auto-baseline failed — run `majlis baseline` manually.');
+    }
+  }
+}
+
+export async function revert(args: string[]): Promise<void> {
+  const root = findProjectRoot();
+  if (!root) throw new Error('Not in a Majlis project. Run `majlis init` first.');
+
+  const db = getDb(root);
+
+  // Get experiment — by slug or latest
+  let exp;
+  const slugArg = args.filter(a => !a.startsWith('--'))[0];
+  if (slugArg) {
+    exp = getExperimentBySlug(db, slugArg);
+    if (!exp) throw new Error(`Experiment not found: ${slugArg}`);
+  } else {
+    exp = getLatestExperiment(db);
+    if (!exp) throw new Error('No active experiments to revert.');
+  }
+
+  // Record dead-end
+  const reasonIdx = args.indexOf('--reason');
+  const reason = reasonIdx >= 0 ? args[reasonIdx + 1] : 'Manually reverted';
+
+  insertDeadEnd(
+    db,
+    exp.id,
+    exp.hypothesis ?? exp.slug,
+    reason,
+    `Reverted: ${reason}`,
+    exp.sub_type,
+  );
+
+  // Update status
+  updateExperimentStatus(db, exp.id, 'dead_end');
+
+  // Handle git branch
+  try {
+    const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim();
+
+    if (currentBranch === exp.branch) {
+      execSync('git checkout main 2>/dev/null || git checkout master', {
+        cwd: root,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+  } catch {
+    fmt.warn('Could not switch git branches — do this manually.');
+  }
+
+  fmt.info(`Experiment ${exp.slug} reverted to dead-end. Reason: ${reason}`);
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 50);
+}
+
+function loadConfig(projectRoot: string): MajlisConfig {
+  const configPath = path.join(projectRoot, '.majlis', 'config.json');
+  if (!fs.existsSync(configPath)) {
+    return { cycle: { auto_baseline_on_new_experiment: false } } as MajlisConfig;
+  }
+  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+}

@@ -1,0 +1,39 @@
+{
+  "name": "create-majlis",
+  "version": "0.1.0",
+  "description": "Scaffold the Majlis Framework into a project",
+  "bin": {
+    "create-majlis": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --clean",
+    "test": "echo 'No tests yet'"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/raihaan123/majlis"
+  },
+  "keywords": [
+    "claude-code",
+    "majlis",
+    "scaffolder",
+    "multi-agent",
+    "create"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "homepage": "https://github.com/raihaan123/majlis#readme",
+  "bugs": {
+    "url": "https://github.com/raihaan123/majlis/issues"
+  }
+}

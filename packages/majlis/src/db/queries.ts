@@ -1,0 +1,396 @@
+import type Database from 'better-sqlite3';
+import type {
+  Experiment, Decision, MetricSnapshot, DeadEnd,
+  Verification, Doubt, SubTypeFailure, Session, Compression,
+} from '../types.js';
+
+/**
+ * All database operations as named functions using prepared statements.
+ * Each function takes a db instance so we can test with in-memory DBs.
+ */
+
+// ── Experiments ──────────────────────────────────────────────
+
+export function createExperiment(
+  db: Database.Database,
+  slug: string,
+  branch: string,
+  hypothesis: string | null,
+  subType: string | null,
+  classificationRef: string | null,
+): Experiment {
+  const stmt = db.prepare(`
+    INSERT INTO experiments (slug, branch, hypothesis, sub_type, classification_ref, status)
+    VALUES (?, ?, ?, ?, ?, 'classified')
+  `);
+  const result = stmt.run(slug, branch, hypothesis, subType, classificationRef);
+  return getExperimentById(db, result.lastInsertRowid as number)!;
+}
+
+export function getExperimentById(db: Database.Database, id: number): Experiment | null {
+  return db.prepare('SELECT * FROM experiments WHERE id = ?').get(id) as Experiment | null;
+}
+
+export function getExperimentBySlug(db: Database.Database, slug: string): Experiment | null {
+  return db.prepare('SELECT * FROM experiments WHERE slug = ?').get(slug) as Experiment | null;
+}
+
+export function updateExperimentStatus(db: Database.Database, id: number, status: string): void {
+  db.prepare(`
+    UPDATE experiments SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(status, id);
+}
+
+export function listActiveExperiments(db: Database.Database): Experiment[] {
+  return db.prepare(`
+    SELECT * FROM experiments WHERE status NOT IN ('merged', 'dead_end')
+    ORDER BY created_at DESC
+  `).all() as Experiment[];
+}
+
+export function listAllExperiments(db: Database.Database): Experiment[] {
+  return db.prepare('SELECT * FROM experiments ORDER BY id').all() as Experiment[];
+}
+
+export function getLatestExperiment(db: Database.Database): Experiment | null {
+  return db.prepare(`
+    SELECT * FROM experiments WHERE status NOT IN ('merged', 'dead_end')
+    ORDER BY created_at DESC LIMIT 1
+  `).get() as Experiment | null;
+}
+
+export function storeBuilderGuidance(db: Database.Database, experimentId: number, guidance: string): void {
+  db.prepare(`
+    UPDATE experiments SET builder_guidance = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(guidance, experimentId);
+}
+
+export function getBuilderGuidance(db: Database.Database, experimentId: number): string | null {
+  const row = db.prepare('SELECT builder_guidance FROM experiments WHERE id = ?').get(experimentId) as { builder_guidance: string | null } | undefined;
+  return row?.builder_guidance ?? null;
+}
+
+// ── Decisions ────────────────────────────────────────────────
+
+export function insertDecision(
+  db: Database.Database,
+  experimentId: number,
+  description: string,
+  evidenceLevel: string,
+  justification: string,
+): Decision {
+  const stmt = db.prepare(`
+    INSERT INTO decisions (experiment_id, description, evidence_level, justification)
+    VALUES (?, ?, ?, ?)
+  `);
+  const result = stmt.run(experimentId, description, evidenceLevel, justification);
+  return db.prepare('SELECT * FROM decisions WHERE id = ?').get(result.lastInsertRowid) as Decision;
+}
+
+export function listDecisionsByExperiment(db: Database.Database, experimentId: number): Decision[] {
+  return db.prepare(`
+    SELECT * FROM decisions WHERE experiment_id = ? ORDER BY created_at
+  `).all(experimentId) as Decision[];
+}
+
+export function listDecisionsByLevel(db: Database.Database, level: string): Decision[] {
+  return db.prepare(`
+    SELECT * FROM decisions WHERE evidence_level = ? AND status = 'active' ORDER BY created_at
+  `).all(level) as Decision[];
+}
+
+export function listAllDecisions(db: Database.Database, level?: string, experimentId?: number): Decision[] {
+  if (level && experimentId) {
+    return db.prepare(`
+      SELECT * FROM decisions WHERE evidence_level = ? AND experiment_id = ? ORDER BY created_at
+    `).all(level, experimentId) as Decision[];
+  }
+  if (level) return listDecisionsByLevel(db, level);
+  if (experimentId) return listDecisionsByExperiment(db, experimentId);
+  return db.prepare('SELECT * FROM decisions ORDER BY created_at').all() as Decision[];
+}
+
+export function overturnDecision(db: Database.Database, decisionId: number, overturnedByDecisionId: number): void {
+  db.prepare(`
+    UPDATE decisions SET status = 'overturned', overturned_by = ? WHERE id = ?
+  `).run(overturnedByDecisionId, decisionId);
+}
+
+// ── Metrics ──────────────────────────────────────────────────
+
+export function insertMetric(
+  db: Database.Database,
+  experimentId: number,
+  phase: string,
+  fixture: string,
+  metricName: string,
+  metricValue: number,
+): MetricSnapshot {
+  const stmt = db.prepare(`
+    INSERT INTO metrics (experiment_id, phase, fixture, metric_name, metric_value)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(experimentId, phase, fixture, metricName, metricValue);
+  return db.prepare('SELECT * FROM metrics WHERE id = ?').get(result.lastInsertRowid) as MetricSnapshot;
+}
+
+export function getMetricsByExperimentAndPhase(
+  db: Database.Database,
+  experimentId: number,
+  phase: string,
+): MetricSnapshot[] {
+  return db.prepare(`
+    SELECT * FROM metrics WHERE experiment_id = ? AND phase = ?
+  `).all(experimentId, phase) as MetricSnapshot[];
+}
+
+export function getMetricHistoryByFixture(db: Database.Database, fixture: string): MetricSnapshot[] {
+  return db.prepare(`
+    SELECT m.*, e.slug as experiment_slug FROM metrics m
+    JOIN experiments e ON m.experiment_id = e.id
+    WHERE m.fixture = ?
+    ORDER BY m.captured_at
+  `).all(fixture) as MetricSnapshot[];
+}
+
+// ── Dead Ends ────────────────────────────────────────────────
+
+export function insertDeadEnd(
+  db: Database.Database,
+  experimentId: number,
+  approach: string,
+  whyFailed: string,
+  structuralConstraint: string,
+  subType: string | null,
+): DeadEnd {
+  const stmt = db.prepare(`
+    INSERT INTO dead_ends (experiment_id, approach, why_failed, structural_constraint, sub_type)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(experimentId, approach, whyFailed, structuralConstraint, subType);
+  return db.prepare('SELECT * FROM dead_ends WHERE id = ?').get(result.lastInsertRowid) as DeadEnd;
+}
+
+export function listDeadEndsBySubType(db: Database.Database, subType: string): DeadEnd[] {
+  return db.prepare(`
+    SELECT * FROM dead_ends WHERE sub_type = ? ORDER BY created_at
+  `).all(subType) as DeadEnd[];
+}
+
+export function listAllDeadEnds(db: Database.Database): DeadEnd[] {
+  return db.prepare('SELECT * FROM dead_ends ORDER BY created_at').all() as DeadEnd[];
+}
+
+export function searchDeadEnds(db: Database.Database, term: string): DeadEnd[] {
+  const pattern = `%${term}%`;
+  return db.prepare(`
+    SELECT * FROM dead_ends
+    WHERE approach LIKE ? OR why_failed LIKE ? OR structural_constraint LIKE ?
+    ORDER BY created_at
+  `).all(pattern, pattern, pattern) as DeadEnd[];
+}
+
+// ── Verifications ────────────────────────────────────────────
+
+export function insertVerification(
+  db: Database.Database,
+  experimentId: number,
+  component: string,
+  grade: string,
+  provenanceIntact: boolean | null,
+  contentCorrect: boolean | null,
+  notes: string | null,
+): Verification {
+  const stmt = db.prepare(`
+    INSERT INTO verifications (experiment_id, component, grade, provenance_intact, content_correct, notes)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    experimentId, component, grade,
+    provenanceIntact === null ? null : provenanceIntact ? 1 : 0,
+    contentCorrect === null ? null : contentCorrect ? 1 : 0,
+    notes,
+  );
+  return db.prepare('SELECT * FROM verifications WHERE id = ?').get(result.lastInsertRowid) as Verification;
+}
+
+export function getVerificationsByExperiment(db: Database.Database, experimentId: number): Verification[] {
+  return db.prepare(`
+    SELECT * FROM verifications WHERE experiment_id = ? ORDER BY created_at
+  `).all(experimentId) as Verification[];
+}
+
+export function getConfirmedDoubts(db: Database.Database, experimentId: number): Doubt[] {
+  return db.prepare(`
+    SELECT * FROM doubts WHERE experiment_id = ? AND resolution = 'confirmed'
+  `).all(experimentId) as Doubt[];
+}
+
+// ── Doubts ───────────────────────────────────────────────────
+
+export function insertDoubt(
+  db: Database.Database,
+  experimentId: number,
+  claimDoubted: string,
+  evidenceLevelOfClaim: string,
+  evidenceForDoubt: string,
+  severity: string,
+): Doubt {
+  const stmt = db.prepare(`
+    INSERT INTO doubts (experiment_id, claim_doubted, evidence_level_of_claim, evidence_for_doubt, severity)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(experimentId, claimDoubted, evidenceLevelOfClaim, evidenceForDoubt, severity);
+  return db.prepare('SELECT * FROM doubts WHERE id = ?').get(result.lastInsertRowid) as Doubt;
+}
+
+export function getDoubtsByExperiment(db: Database.Database, experimentId: number): Doubt[] {
+  return db.prepare(`
+    SELECT * FROM doubts WHERE experiment_id = ? ORDER BY created_at
+  `).all(experimentId) as Doubt[];
+}
+
+export function updateDoubtResolution(db: Database.Database, doubtId: number, resolution: string): void {
+  db.prepare('UPDATE doubts SET resolution = ? WHERE id = ?').run(resolution, doubtId);
+}
+
+export function hasDoubts(db: Database.Database, experimentId: number): boolean {
+  const row = db.prepare('SELECT COUNT(*) as count FROM doubts WHERE experiment_id = ?').get(experimentId) as { count: number };
+  return row.count > 0;
+}
+
+export function hasChallenges(db: Database.Database, experimentId: number): boolean {
+  const row = db.prepare('SELECT COUNT(*) as count FROM challenges WHERE experiment_id = ?').get(experimentId) as { count: number };
+  return row.count > 0;
+}
+
+export function insertChallenge(
+  db: Database.Database,
+  experimentId: number,
+  description: string,
+  reasoning: string,
+): { id: number; experiment_id: number; description: string; reasoning: string } {
+  const stmt = db.prepare(`
+    INSERT INTO challenges (experiment_id, description, reasoning) VALUES (?, ?, ?)
+  `);
+  const result = stmt.run(experimentId, description, reasoning);
+  return db.prepare('SELECT * FROM challenges WHERE id = ?').get(result.lastInsertRowid) as any;
+}
+
+export function getChallengesByExperiment(db: Database.Database, experimentId: number): Array<{ id: number; experiment_id: number; description: string; reasoning: string; created_at: string }> {
+  return db.prepare('SELECT * FROM challenges WHERE experiment_id = ? ORDER BY created_at').all(experimentId) as any[];
+}
+
+// ── Sub-Type Failures (Circuit Breakers) ─────────────────────
+
+export function incrementSubTypeFailure(
+  db: Database.Database,
+  subType: string,
+  experimentId: number,
+  grade: string,
+): void {
+  db.prepare(`
+    INSERT INTO sub_type_failures (sub_type, experiment_id, grade)
+    VALUES (?, ?, ?)
+  `).run(subType, experimentId, grade);
+}
+
+export function getSubTypeFailures(db: Database.Database, subType: string): SubTypeFailure[] {
+  return db.prepare(`
+    SELECT * FROM sub_type_failures WHERE sub_type = ? ORDER BY created_at
+  `).all(subType) as SubTypeFailure[];
+}
+
+export function getSubTypeFailureCount(db: Database.Database, subType: string): number {
+  const row = db.prepare(`
+    SELECT COUNT(*) as count FROM sub_type_failures
+    WHERE sub_type = ? AND grade IN ('weak', 'rejected')
+  `).get(subType) as { count: number };
+  return row.count;
+}
+
+export function checkCircuitBreaker(db: Database.Database, subType: string, threshold: number): boolean {
+  return getSubTypeFailureCount(db, subType) >= threshold;
+}
+
+export function getAllCircuitBreakerStates(db: Database.Database, threshold: number): Array<{ sub_type: string; failure_count: number; tripped: boolean }> {
+  const rows = db.prepare(`
+    SELECT sub_type, COUNT(*) as failure_count
+    FROM sub_type_failures
+    WHERE grade IN ('weak', 'rejected')
+    GROUP BY sub_type
+  `).all() as Array<{ sub_type: string; failure_count: number }>;
+  return rows.map(r => ({ ...r, tripped: r.failure_count >= threshold }));
+}
+
+// ── Sessions ─────────────────────────────────────────────────
+
+export function startSession(
+  db: Database.Database,
+  intent: string,
+  experimentId: number | null,
+): Session {
+  const stmt = db.prepare(`
+    INSERT INTO sessions (intent, experiment_id) VALUES (?, ?)
+  `);
+  const result = stmt.run(intent, experimentId);
+  return db.prepare('SELECT * FROM sessions WHERE id = ?').get(result.lastInsertRowid) as Session;
+}
+
+export function endSession(
+  db: Database.Database,
+  sessionId: number,
+  accomplished: string | null,
+  unfinished: string | null,
+  newFragility: string | null,
+): void {
+  db.prepare(`
+    UPDATE sessions SET ended_at = CURRENT_TIMESTAMP,
+    accomplished = ?, unfinished = ?, new_fragility = ?
+    WHERE id = ?
+  `).run(accomplished, unfinished, newFragility, sessionId);
+}
+
+export function getActiveSession(db: Database.Database): Session | null {
+  return db.prepare(`
+    SELECT * FROM sessions WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1
+  `).get() as Session | null;
+}
+
+export function getSessionsSinceCompression(db: Database.Database): number {
+  const lastCompression = db.prepare(`
+    SELECT created_at FROM compressions ORDER BY created_at DESC LIMIT 1
+  `).get() as { created_at: string } | undefined;
+
+  if (!lastCompression) {
+    const row = db.prepare('SELECT COUNT(*) as count FROM sessions').get() as { count: number };
+    return row.count;
+  }
+
+  const row = db.prepare(`
+    SELECT COUNT(*) as count FROM sessions WHERE started_at > ?
+  `).get(lastCompression.created_at) as { count: number };
+  return row.count;
+}
+
+// ── Compressions ─────────────────────────────────────────────
+
+export function recordCompression(
+  db: Database.Database,
+  sessionCountSinceLast: number,
+  synthesisSizeBefore: number,
+  synthesisSizeAfter: number,
+): Compression {
+  const stmt = db.prepare(`
+    INSERT INTO compressions (session_count_since_last, synthesis_size_before, synthesis_size_after)
+    VALUES (?, ?, ?)
+  `);
+  const result = stmt.run(sessionCountSinceLast, synthesisSizeBefore, synthesisSizeAfter);
+  return db.prepare('SELECT * FROM compressions WHERE id = ?').get(result.lastInsertRowid) as Compression;
+}
+
+export function getLastCompression(db: Database.Database): Compression | null {
+  return db.prepare(`
+    SELECT * FROM compressions ORDER BY created_at DESC LIMIT 1
+  `).get() as Compression | null;
+}

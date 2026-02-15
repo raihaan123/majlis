@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.db
+.majlis/majlis.db
+*.tsbuildinfo
+.DS_Store
