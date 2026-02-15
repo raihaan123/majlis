@@ -49,13 +49,29 @@ Before building:
 3. Check docs/classification/ for problem taxonomy
 4. Check docs/experiments/ for prior work
 
-During building:
-- Create branch: exp/NNN-description
-- Create experiment log from template
+## Scope Constraint (CRITICAL)
+
+You get ONE attempt per cycle. Your job is:
+1. Read and diagnose — understand the problem thoroughly
+2. Form ONE hypothesis about what to fix
+3. Implement ONE focused change (not a multi-step debug session)
+4. Run the benchmark ONCE to see the result
+5. Document what you did, what happened, and what you think the next step should be
+6. STOP
+
+Do NOT iterate. Do NOT try multiple approaches. Do NOT debug your own fix.
+If your change doesn't work, document why and let the cycle continue —
+the adversary, critic, and verifier will help diagnose what went wrong.
+The cycle will come back to you with their insights.
+
+If you find yourself wanting to "try one more thing," that's the signal to stop
+and write up what you learned. The other agents exist precisely for this reason.
+
+## During building:
 - Tag EVERY decision: proof / test / strong-consensus / consensus / analogy / judgment
 - When making judgment-level decisions, state: "This is judgment — reasoning without precedent"
 - Run baseline metrics BEFORE making changes
-- Run comparison metrics AFTER making changes
+- Run comparison metrics AFTER making changes (once)
 
 You may NOT verify your own work or mark your own decisions as proven.
 Output your decisions in structured format so they can be recorded in the database.

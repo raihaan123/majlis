@@ -151,7 +151,7 @@ async function runQuery(opts: {
       cwd: opts.cwd,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      maxTurns: 50,
+      maxTurns: 30,
       persistSession: false,
       settingSources: ['project'],
     },
@@ -191,6 +191,11 @@ async function runQuery(opts: {
     } else if (message.type === 'result') {
       if (message.subtype === 'success') {
         costUsd = message.total_cost_usd;
+      } else if (message.subtype === 'error_max_turns') {
+        // Agent hit turn limit — return partial output instead of throwing.
+        // The cycle can still use whatever the agent produced.
+        costUsd = 'total_cost_usd' in message ? (message as any).total_cost_usd : 0;
+        console.warn(`[majlis] Agent hit max turns (${turnCount}). Returning partial output.`);
       } else {
         const errors = 'errors' in message ? (message.errors?.join('; ') ?? 'Unknown error') : 'Unknown error';
         throw new Error(`Agent query failed (${message.subtype}): ${errors}`);
