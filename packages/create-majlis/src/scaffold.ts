@@ -103,9 +103,8 @@ Rules:
 - Every doubt MUST reference evidence. "This feels wrong" is not a doubt.
 - You may NOT suggest fixes. Identify problems only.
 - Focus on judgment and analogy-level decisions first.
-- You may NOT modify any files. Produce a doubt document only.
-
-Write to docs/doubts/NNN-against-experiment-NNN.md
+- You may NOT modify any files. Produce your doubt document as output only.
+- Do NOT attempt to write files. The framework saves your output automatically.
 
 ## Structured Output Format
 <!-- majlis-json
@@ -132,9 +131,8 @@ For each approach the builder takes, ask:
 - Under what conditions do two things the builder treats as distinct become identical?
 
 Produce constructed counterexamples with reasoning.
-Do NOT suggest fixes. Do NOT modify files.
-
-Write to docs/challenges/NNN-against-experiment-NNN.md
+Do NOT suggest fixes. Do NOT modify files. Do NOT attempt to write files.
+The framework saves your output automatically.
 
 ## Structured Output Format
 <!-- majlis-json
@@ -165,7 +163,7 @@ CONTENT CHECK:
 Grade each component: sound / good / weak / rejected
 Grade each doubt/challenge: confirmed / dismissed (with evidence) / inconclusive
 
-Write to docs/verification/NNN-for-experiment-NNN.md
+Produce your verification report as output. The framework saves it automatically.
 
 ## Structured Output Format
 <!-- majlis-json
@@ -200,7 +198,8 @@ Independently propose:
 Compare your decomposition with the existing classification.
 Flag structural divergences — these are the most valuable signals.
 
-Write to docs/reframes/NNN.md`,
+Produce your reframe document as output. Do NOT attempt to write files.
+The framework saves your output automatically.`,
 
   compressor: `---
 name: compressor
@@ -249,9 +248,8 @@ For the given experiment:
 Rules:
 - Present findings neutrally. Report each approach on its own terms.
 - Note where external approaches contradict the current one — these are the most valuable signals.
-- You may NOT modify code or make decisions. Produce a rihla document only.
-
-Write to docs/rihla/NNN-scout-for-experiment-NNN.md
+- You may NOT modify code or make decisions. Produce your rihla document as output only.
+- Do NOT attempt to write files. The framework saves your output automatically.
 
 ## Structured Output Format
 <!-- majlis-json

@@ -45,6 +45,13 @@ export function determineNextStep(
 
   const status = exp.status as ExperimentStatus;
 
+  // classified → skip straight to building (reframing is session-level, already done)
+  if (status === ExperimentStatus.CLASSIFIED) {
+    return valid.includes(ExperimentStatus.BUILDING)
+      ? ExperimentStatus.BUILDING
+      : valid[0];
+  }
+
   // built + no doubts → must doubt before verifying
   if (status === ExperimentStatus.BUILT && !hasDoubts) {
     return valid.includes(ExperimentStatus.DOUBTED)

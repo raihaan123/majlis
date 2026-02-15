@@ -174,11 +174,11 @@ describe('determineNextStep()', () => {
     assert.equal(result, ExperimentStatus.VERIFYING);
   });
 
-  it('classified → first valid (reframed)', () => {
+  it('classified → building (skip reframe, already session-level)', () => {
     const exp = makeExp({ status: 'classified' });
     const valid = TRANSITIONS[ExperimentStatus.CLASSIFIED];
     const result = determineNextStep(exp, valid, false, false);
-    assert.equal(result, ExperimentStatus.REFRAMED);
+    assert.equal(result, ExperimentStatus.BUILDING);
   });
 
   it('throws on terminal states', () => {

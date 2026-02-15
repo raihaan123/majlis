@@ -181,6 +181,12 @@ async function executeStep(
     case ExperimentStatus.COMPRESSED:
       await cycle('compress', []);
       break;
+    case ExperimentStatus.REFRAMED:
+      // Reframing is session-level (already done before experiment creation).
+      // Just advance the status so the next iteration picks up building.
+      updateExperimentStatus(getDb(root), exp.id, 'reframed');
+      fmt.info(`Reframe acknowledged for ${exp.slug}. Proceeding to build.`);
+      break;
     default:
       fmt.warn(`Don't know how to execute step: ${step}`);
   }
