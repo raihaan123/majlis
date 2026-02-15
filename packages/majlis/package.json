@@ -1,6 +1,6 @@
 {
   "name": "majlis",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Multi-agent workflow CLI for structured doubt, independent verification, and compressed knowledge",
   "bin": {
     "majlis": "./dist/cli.js"
@@ -10,6 +10,7 @@
     "test": "tsx --test src/test/*.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.42",
     "better-sqlite3": "^11.0.0"
   },
   "devDependencies": {

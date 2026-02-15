@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
-import { spawn } from 'node:child_process';
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentDefinition, AgentResult, AgentContext, StructuredOutput } from './types.js';
 import { extractStructuredData } from './parse.js';
 import { findProjectRoot } from '../db/connection.js';
@@ -30,7 +30,7 @@ export function loadAgentDefinition(role: string, projectRoot?: string): AgentDe
 
   // Simple YAML parsing for our known fields (avoid yaml dependency)
   const name = extractYamlField(frontmatter, 'name') ?? role;
-  const model = extractYamlField(frontmatter, 'model') ?? 'sonnet';
+  const model = extractYamlField(frontmatter, 'model') ?? 'opus';
   const toolsStr = extractYamlField(frontmatter, 'tools') ?? '[]';
   const tools = toolsStr
     .replace(/[\[\]]/g, '')
@@ -47,18 +47,8 @@ function extractYamlField(yaml: string, field: string): string | null {
 }
 
 /**
- * Write context data to a temp JSON file for the agent to read.
- */
-export function writeTempContext(context: AgentContext): string {
-  const tmpDir = os.tmpdir();
-  const tmpFile = path.join(tmpDir, `majlis-context-${Date.now()}.json`);
-  fs.writeFileSync(tmpFile, JSON.stringify(context, null, 2));
-  return tmpFile;
-}
-
-/**
- * Spawn a Claude Code subagent with the specified role and context.
- * Uses --print --output-format stream-json per PRD v2 §4.6.
+ * Spawn a Claude agent with the specified role and context.
+ * Uses the Claude Agent SDK for in-process execution.
  */
 export async function spawnAgent(
   role: string,
@@ -66,27 +56,23 @@ export async function spawnAgent(
   projectRoot?: string,
 ): Promise<AgentResult> {
   const agentDef = loadAgentDefinition(role, projectRoot);
-  const contextFile = writeTempContext(context);
   const root = projectRoot ?? findProjectRoot() ?? process.cwd();
 
   const taskPrompt = context.taskPrompt ?? `Perform your role as ${agentDef.name}.`;
-  const prompt = `Read the context at ${contextFile}. ${taskPrompt}`;
-
-  const args = [
-    '--print',
-    '--output-format', 'stream-json',
-    '--model', agentDef.model,
-    '--allowedTools', ...agentDef.tools,
-    '--append-system-prompt', agentDef.systemPrompt,
-    '-p', prompt,
-  ];
+  const contextJson = JSON.stringify(context, null, 2);
+  const prompt = `Here is your context:\n\n\`\`\`json\n${contextJson}\n\`\`\`\n\n${taskPrompt}`;
 
   console.log(`[majlis] Spawning ${role} agent (model: ${agentDef.model})...`);
 
-  const output = await runClaude(args, root);
+  const { text: markdown, costUsd } = await runQuery({
+    prompt,
+    model: agentDef.model,
+    tools: agentDef.tools,
+    systemPrompt: agentDef.systemPrompt,
+    cwd: root,
+  });
 
-  // Parse stream-json output — collect all text content
-  const markdown = parseStreamJsonOutput(output);
+  console.log(`[majlis] ${role} agent complete (cost: $${costUsd.toFixed(4)})`);
 
   // Write artifact to docs/ directory
   const artifactPath = writeArtifact(role, context, markdown, root);
@@ -95,107 +81,99 @@ export async function spawnAgent(
   }
 
   // Extract structured data via 3-tier parsing
-  const structured = extractStructuredData(role, markdown);
-
-  // Clean up temp file
-  try { fs.unlinkSync(contextFile); } catch { /* ignore */ }
+  const structured = await extractStructuredData(role, markdown);
 
   return { output: markdown, structured };
 }
 
 /**
  * Spawn a small synthesiser micro-agent (for resolve step).
- * Not a full role — just a focused Haiku/Sonnet call.
+ * Not a full role — just a focused Sonnet call.
  */
 export async function spawnSynthesiser(
   context: AgentContext,
   projectRoot?: string,
 ): Promise<AgentResult> {
-  const contextFile = writeTempContext(context);
   const root = projectRoot ?? findProjectRoot() ?? process.cwd();
 
-  const prompt = `Read the context at ${contextFile}. ${context.taskPrompt ?? 'Synthesise the findings into actionable builder guidance.'}`;
+  const contextJson = JSON.stringify(context, null, 2);
+  const taskPrompt = context.taskPrompt ?? 'Synthesise the findings into actionable builder guidance.';
+  const prompt = `Here is your context:\n\n\`\`\`json\n${contextJson}\n\`\`\`\n\n${taskPrompt}`;
 
-  const args = [
-    '--print',
-    '--output-format', 'stream-json',
-    '--model', 'sonnet',
-    '--allowedTools', 'Read', 'Glob', 'Grep',
-    '--append-system-prompt', 'You are a Synthesis Agent. Your job is to take a verification report, confirmed doubts, and adversarial test results, and compress them into specific, actionable guidance for the builder\'s next attempt. Be concrete: which decisions failed, which assumptions broke, what constraints must the next approach satisfy. Output a \'guidance\' field in JSON wrapped in a <!-- majlis-json --> block.',
-    '-p', prompt,
-  ];
+  const systemPrompt =
+    'You are a Synthesis Agent. Your job is to take a verification report, confirmed doubts, ' +
+    'and adversarial test results, and compress them into specific, actionable guidance for ' +
+    'the builder\'s next attempt. Be concrete: which decisions failed, which assumptions broke, ' +
+    'what constraints must the next approach satisfy. Output a \'guidance\' field in JSON ' +
+    'wrapped in a <!-- majlis-json --> block.';
 
   console.log(`[majlis] Spawning synthesiser micro-agent...`);
-  const output = await runClaude(args, root);
-  const markdown = parseStreamJsonOutput(output);
-  const structured = extractStructuredData('synthesiser', markdown);
 
-  try { fs.unlinkSync(contextFile); } catch { /* ignore */ }
+  const { text: markdown, costUsd } = await runQuery({
+    prompt,
+    model: 'opus',
+    tools: ['Read', 'Glob', 'Grep'],
+    systemPrompt,
+    cwd: root,
+  });
+
+  console.log(`[majlis] Synthesiser complete (cost: $${costUsd.toFixed(4)})`);
+
+  const structured = await extractStructuredData('synthesiser', markdown);
 
   return { output: markdown, structured };
 }
 
-function runClaude(args: string[], cwd: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('claude', args, {
-      cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`claude exited with code ${code}: ${stderr}`));
-      } else {
-        resolve(stdout);
-      }
-    });
-
-    proc.on('error', (err) => {
-      reject(new Error(`Failed to spawn claude: ${err.message}`));
-    });
-  });
-}
-
 /**
- * Parse stream-json output from Claude --output-format stream-json.
- * Collects all assistant text content into a single markdown string.
+ * Run a Claude Agent SDK query and collect the text output.
  */
-function parseStreamJsonOutput(raw: string): string {
-  const parts: string[] = [];
+async function runQuery(opts: {
+  prompt: string;
+  model: string;
+  tools: string[];
+  systemPrompt: string;
+  cwd: string;
+}): Promise<{ text: string; costUsd: number }> {
+  const conversation = query({
+    prompt: opts.prompt,
+    options: {
+      model: opts.model,
+      tools: opts.tools,
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: opts.systemPrompt,
+      },
+      cwd: opts.cwd,
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      maxTurns: 50,
+      persistSession: false,
+      settingSources: ['project'],
+    },
+  });
 
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const event = JSON.parse(line);
-      // stream-json events have different types
-      if (event.type === 'assistant' && event.message?.content) {
-        for (const block of event.message.content) {
-          if (block.type === 'text') {
-            parts.push(block.text);
-          }
-        }
-      } else if (event.type === 'content_block_delta' && event.delta?.text) {
-        parts.push(event.delta.text);
-      } else if (event.type === 'result' && event.result) {
-        // Final result message
-        if (typeof event.result === 'string') {
-          parts.push(event.result);
+  const textParts: string[] = [];
+  let costUsd = 0;
+
+  for await (const message of conversation) {
+    if (message.type === 'assistant') {
+      for (const block of message.message.content) {
+        if (block.type === 'text') {
+          textParts.push(block.text);
         }
       }
-    } catch {
-      // Not JSON — might be raw text output
-      if (line.trim()) parts.push(line);
+    } else if (message.type === 'result') {
+      if (message.subtype === 'success') {
+        costUsd = message.total_cost_usd;
+      } else {
+        const errors = 'errors' in message ? (message.errors?.join('; ') ?? 'Unknown error') : 'Unknown error';
+        throw new Error(`Agent query failed (${message.subtype}): ${errors}`);
+      }
     }
   }
 
-  return parts.join('');
+  return { text: textParts.join('\n\n'), costUsd };
 }
 
 /**

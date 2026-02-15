@@ -28,9 +28,9 @@ Majlis is a multi-agent workflow framework for [Claude Code](https://docs.anthro
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    LAYER 3: LLM Agents                      │
-│  builder(opus) · critic(sonnet) · adversary(sonnet)         │
-│  verifier(sonnet) · reframer(opus) · compressor(opus)       │
-│  scout(sonnet)                                              │
+│  builder(opus) · critic(opus) · adversary(opus)             │
+│  verifier(opus) · reframer(opus) · compressor(opus)         │
+│  scout(opus)                                                │
 │                                                             │
 │  Creative work. Judgment calls. The scholarship.            │
 ├─────────────────────────────────────────────────────────────┤
@@ -80,12 +80,12 @@ Every decision is tagged with its justification level. Stored as database column
 | Role | Function | Model |
 |---|---|---|
 | **Builder** | Writes code, runs experiments, tags every decision | opus |
-| **Critic** | Challenges with evidence, produces doubt documents | sonnet |
-| **Adversary** | Constructs pathological inputs to break approaches | sonnet |
-| **Verifier** | Dual provenance + content checks, grades components | sonnet |
+| **Critic** | Challenges with evidence, produces doubt documents | opus |
+| **Adversary** | Constructs pathological inputs to break approaches | opus |
+| **Verifier** | Dual provenance + content checks, grades components | opus |
 | **Reframer** | Independently decomposes from scratch (never sees builder code) | opus |
 | **Compressor** | Compresses, cross-references, maintains dead-end registry | opus |
-| **Scout** | Searches externally for alternative approaches | sonnet |
+| **Scout** | Searches externally for alternative approaches | opus |
 
 ## Commands
 

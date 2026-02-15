@@ -1,6 +1,6 @@
 # create-majlis
 
-Scaffold the [Majlis Framework](../../README.md) into a project.
+Scaffold the [Majlis Framework](https://github.com/raihaan123/majlis#readme) into a project.
 
 ## Usage
 

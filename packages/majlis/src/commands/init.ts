@@ -27,9 +27,9 @@ const DEFAULT_CONFIG = {
   },
   models: {
     builder: 'opus',
-    critic: 'sonnet',
-    adversary: 'sonnet',
-    verifier: 'sonnet',
+    critic: 'opus',
+    adversary: 'opus',
+    verifier: 'opus',
     reframer: 'opus',
     compressor: 'opus',
   },
@@ -74,7 +74,7 @@ At the end of your work, include a <!-- majlis-json --> block with your decision
 
   critic: `---
 name: critic
-model: sonnet
+model: opus
 tools: [Read, Glob, Grep]
 ---
 You are the Critic. You practise constructive doubt.
@@ -107,7 +107,7 @@ Write to docs/doubts/NNN-against-experiment-NNN.md
 
   adversary: `---
 name: adversary
-model: sonnet
+model: opus
 tools: [Read, Glob, Grep]
 ---
 You are the Adversary. You do NOT review code for bugs.
@@ -136,7 +136,7 @@ Write to docs/challenges/NNN-against-experiment-NNN.md
 
   verifier: `---
 name: verifier
-model: sonnet
+model: opus
 tools: [Read, Glob, Grep, Bash]
 ---
 You are the Verifier. Perform dual verification:
@@ -220,7 +220,7 @@ You may NOT write code, make decisions, or run experiments.
 
   scout: `---
 name: scout
-model: sonnet
+model: opus
 tools: [Read, Glob, Grep, WebSearch]
 ---
 You are the Scout. You practise rihla — travel in search of knowledge.

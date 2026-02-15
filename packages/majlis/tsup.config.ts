@@ -6,4 +6,5 @@ export default defineConfig({
   clean: true,
   platform: 'node',
   target: 'es2022',
+  external: ['better-sqlite3', '@anthropic-ai/claude-agent-sdk'],
 });

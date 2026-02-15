@@ -2,7 +2,7 @@
 
 Multi-agent workflow CLI for structured doubt, independent verification, and compressed knowledge.
 
-This is the CLI package. For full documentation, see the [root README](../../README.md).
+This is the CLI package. For full documentation, see the [root README](https://github.com/raihaan123/majlis#readme).
 
 ## Installation
 

@@ -1,6 +1,6 @@
 import type { StructuredOutput } from './types.js';
 import { EXTRACTION_SCHEMA } from './types.js';
-import { execSync } from 'node:child_process';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 
 /**
  * 3-tier extraction strategy for structured data from agent output.
@@ -9,10 +9,10 @@ import { execSync } from 'node:child_process';
  * LLMs are unreliable at JSON formatting under complex reasoning load.
  * Never fail silently — warn loudly, degrade gracefully.
  */
-export function extractStructuredData(
+export async function extractStructuredData(
   role: string,
   markdown: string,
-): StructuredOutput | null {
+): Promise<StructuredOutput | null> {
   // Tier 1: Parse <!-- majlis-json --> block
   const tier1 = extractMajlisJsonBlock(markdown);
   if (tier1) {
@@ -32,7 +32,7 @@ export function extractStructuredData(
 
   // Tier 3: Haiku post-processing
   console.warn(`[majlis] Regex fallback insufficient for ${role}. Using Haiku extraction.`);
-  const tier3 = extractViaHaiku(role, markdown);
+  const tier3 = await extractViaHaiku(role, markdown);
   if (tier3) return tier3;
 
   // All tiers failed
@@ -139,25 +139,39 @@ export function extractViaPatterns(role: string, markdown: string): StructuredOu
 }
 
 /**
- * Tier 3: Haiku post-processing — cheap focused LLM call.
+ * Tier 3: Haiku post-processing — cheap focused LLM call via Agent SDK.
  */
-function extractViaHaiku(role: string, markdown: string): StructuredOutput | null {
+async function extractViaHaiku(role: string, markdown: string): Promise<StructuredOutput | null> {
   try {
-    // Truncate if too long for a Haiku call
     const truncated = markdown.length > 8000 ? markdown.slice(0, 8000) + '\n[truncated]' : markdown;
 
     const prompt = `Extract all decisions, evidence levels, grades, doubts, and guidance from this ${role} document as JSON. Follow this schema exactly: ${EXTRACTION_SCHEMA}\n\nDocument:\n${truncated}`;
 
-    const result = execSync(
-      `claude --print --model haiku --output-format json -p ${JSON.stringify(prompt)}`,
-      {
-        encoding: 'utf-8',
-        timeout: 30000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }
-    );
+    const conversation = query({
+      prompt,
+      options: {
+        model: 'haiku',
+        tools: [],
+        systemPrompt: 'You are a JSON extraction assistant. Output only valid JSON matching the requested schema. No markdown, no explanation, just JSON.',
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        maxTurns: 1,
+        persistSession: false,
+      },
+    });
 
-    return tryParseJson(result.trim());
+    let resultText = '';
+    for await (const message of conversation) {
+      if (message.type === 'assistant') {
+        for (const block of message.message.content) {
+          if (block.type === 'text') {
+            resultText += block.text;
+          }
+        }
+      }
+    }
+
+    return tryParseJson(resultText.trim());
   } catch (err) {
     console.warn(`[majlis] Haiku extraction failed for ${role}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
