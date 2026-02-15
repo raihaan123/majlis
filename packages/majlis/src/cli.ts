@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
-const VERSION = '0.1.0';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
+const VERSION = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'),
+).version;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);

@@ -47,7 +47,8 @@ afterEach(() => {
 describe('majlis --version', () => {
   it('prints version', () => {
     const output = run('--version');
-    assert.equal(output.trim(), '0.1.0');
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf-8'));
+    assert.equal(output.trim(), pkg.version);
   });
 });
 
