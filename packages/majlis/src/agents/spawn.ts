@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentDefinition, AgentResult, AgentContext, StructuredOutput } from './types.js';
 import { extractStructuredData } from './parse.js';
 import { findProjectRoot } from '../db/connection.js';
@@ -124,8 +123,13 @@ export async function spawnSynthesiser(
   return { output: markdown, structured };
 }
 
+const DIM = '\x1b[2m';
+const RESET = '\x1b[0m';
+const CYAN = '\x1b[36m';
+
 /**
  * Run a Claude Agent SDK query and collect the text output.
+ * Streams live progress to stderr so the user can see what's happening.
  */
 async function runQuery(opts: {
   prompt: string;
@@ -155,13 +159,34 @@ async function runQuery(opts: {
 
   const textParts: string[] = [];
   let costUsd = 0;
+  let turnCount = 0;
 
   for await (const message of conversation) {
     if (message.type === 'assistant') {
+      turnCount++;
+      let hasText = false;
       for (const block of message.message.content) {
         if (block.type === 'text') {
           textParts.push(block.text);
+          hasText = true;
+        } else if (block.type === 'tool_use') {
+          const toolName = (block as any).name ?? 'tool';
+          const input = (block as any).input ?? {};
+          const detail = formatToolDetail(toolName, input);
+          process.stderr.write(`${DIM}[majlis]   ${CYAN}${toolName}${RESET}${DIM}${detail}${RESET}\n`);
         }
+      }
+      if (hasText) {
+        // Show a brief preview of the text output
+        const preview = textParts[textParts.length - 1].slice(0, 120).replace(/\n/g, ' ').trim();
+        if (preview) {
+          process.stderr.write(`${DIM}[majlis]   writing: ${preview}${preview.length >= 120 ? '...' : ''}${RESET}\n`);
+        }
+      }
+    } else if (message.type === 'tool_progress') {
+      const elapsed = Math.round(message.elapsed_time_seconds);
+      if (elapsed > 0 && elapsed % 5 === 0) {
+        process.stderr.write(`${DIM}[majlis]   ${message.tool_name} running (${elapsed}s)...${RESET}\n`);
       }
     } else if (message.type === 'result') {
       if (message.subtype === 'success') {
@@ -174,6 +199,30 @@ async function runQuery(opts: {
   }
 
   return { text: textParts.join('\n\n'), costUsd };
+}
+
+/**
+ * Format a brief detail string for a tool use event.
+ */
+function formatToolDetail(toolName: string, input: Record<string, any>): string {
+  switch (toolName) {
+    case 'Read':
+      return input.file_path ? ` ${input.file_path}` : '';
+    case 'Write':
+      return input.file_path ? ` → ${input.file_path}` : '';
+    case 'Edit':
+      return input.file_path ? ` ${input.file_path}` : '';
+    case 'Glob':
+      return input.pattern ? ` ${input.pattern}` : '';
+    case 'Grep':
+      return input.pattern ? ` /${input.pattern}/` : '';
+    case 'Bash':
+      return input.command ? ` $ ${input.command.slice(0, 80)}` : '';
+    case 'WebSearch':
+      return input.query ? ` "${input.query}"` : '';
+    default:
+      return '';
+  }
 }
 
 /**
