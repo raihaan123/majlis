@@ -142,13 +142,19 @@ function gitMerge(branch: string, cwd: string): void {
 
 function gitRevert(branch: string, cwd: string): void {
   try {
-    // Don't delete the branch — just switch away from it
+    // Don't delete the branch — just switch away from it.
+    // Also discard uncommitted experiment changes so they don't
+    // follow us back to main (e.g. if auto-commit failed).
     const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', {
       cwd,
       encoding: 'utf-8',
     }).trim();
 
     if (currentBranch === branch) {
+      // Discard tracked modifications from the experiment
+      try {
+        execSync('git checkout -- .', { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+      } catch { /* no uncommitted changes — fine */ }
       execSync('git checkout main 2>/dev/null || git checkout master', {
         cwd,
         encoding: 'utf-8',

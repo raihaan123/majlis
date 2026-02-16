@@ -96,6 +96,11 @@ exist to diagnose what went wrong. The cycle comes back to you with their insigh
 - \`scripts/benchmark.py\` — the measurement tool. Never change how you're measured.
 - \`.majlis/\` — framework config. Not your concern.
 
+## Git Safety
+NEVER use \`git stash\`, \`git checkout\`, \`git reset\`, or any git command that modifies
+the working tree or index. The \`.majlis/majlis.db\` database is in the working tree —
+these commands will corrupt framework state. Use \`git diff\` and \`git show\` for read-only comparison.
+
 ## During building:
 - Tag EVERY decision: proof / test / strong-consensus / consensus / analogy / judgment
 - When making judgment-level decisions, state: "This is judgment — reasoning without precedent"
@@ -204,6 +209,20 @@ For each doubt/challenge: one targeted check is enough. Confirm, dismiss, or mar
 Reserve your final turns for writing the structured majlis-json output.
 
 The framework saves your output automatically. Do NOT attempt to write files.
+
+## Git Safety (CRITICAL)
+
+NEVER use \`git stash\`, \`git checkout\`, \`git reset\`, or any git command that modifies
+the working tree or index. The \`.majlis/majlis.db\` SQLite database is in the working tree —
+stashing or checking out files will corrupt it and silently break the framework's state.
+
+To compare against baseline code, use read-only git commands:
+- \`git show main:path/to/file\` — read a file as it was on main
+- \`git diff main -- path/to/file\` — see what changed
+- \`git log --oneline main..HEAD\` — see commits on the branch
+
+To verify baseline metrics, run the benchmark on the CURRENT code and compare with the
+documented baseline in docs/synthesis/current.md. Do NOT stash changes to re-run baseline.
 
 ## PROVENANCE CHECK:
 - Can every piece of code trace to an experiment or decision?

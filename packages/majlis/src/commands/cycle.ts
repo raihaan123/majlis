@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { execSync } from 'node:child_process';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import {
   getExperimentBySlug,
@@ -114,6 +115,10 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
     }, root);
     fmt.warn(`Experiment stays at 'building'. Run \`majlis build\` to retry or \`majlis revert\` to abandon.`);
   } else {
+    // Auto-commit builder's changes on the experiment branch.
+    // This ensures gitRevert() can cleanly discard the branch on rejection,
+    // and gitMerge() has actual commits to merge on success.
+    gitCommitBuild(exp, root);
     updateExperimentStatus(db, exp.id, 'built');
     fmt.success(`Build complete for ${exp.slug}. Run \`majlis doubt\` or \`majlis challenge\` next.`);
   }
@@ -268,6 +273,29 @@ async function doCompress(db: ReturnType<typeof getDb>, root: string): Promise<v
   recordCompression(db, sessionCount, sizeBefore, sizeAfter);
 
   fmt.success(`Compression complete. Synthesis: ${sizeBefore}B → ${sizeAfter}B`);
+}
+
+/**
+ * Auto-commit builder's changes on the experiment branch.
+ * Excludes .majlis/ (framework DB) from the commit.
+ * Failures are non-fatal — the build still succeeds.
+ */
+function gitCommitBuild(exp: Experiment, cwd: string): void {
+  try {
+    // Stage everything except the framework DB
+    execSync('git add -A -- ":!.majlis/"', { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    // Check if there's anything staged
+    const diff = execSync('git diff --cached --stat', { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    if (!diff) {
+      fmt.info('No code changes to commit.');
+      return;
+    }
+    const msg = `EXP-${String(exp.id).padStart(3, '0')}: ${exp.slug}\n\n${exp.hypothesis ?? ''}`;
+    execSync(`git commit -m ${JSON.stringify(msg)}`, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    fmt.info(`Committed builder changes on ${exp.branch}.`);
+  } catch {
+    fmt.warn('Could not auto-commit builder changes — commit manually before resolving.');
+  }
 }
 
 function resolveExperimentArg(db: ReturnType<typeof getDb>, args: string[]): Experiment {
