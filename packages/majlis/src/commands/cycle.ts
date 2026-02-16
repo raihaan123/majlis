@@ -32,8 +32,9 @@ import { transition } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
 import { spawnAgent, spawnRecovery } from '../agents/spawn.js';
 import { resolve as resolveExperiment } from '../resolve.js';
-import type { Experiment, Doubt, MajlisConfig } from '../types.js';
+import type { Experiment, Doubt } from '../types.js';
 import type { StructuredOutput } from '../agents/types.js';
+import { loadConfig, readFileOrEmpty, truncateContext, CONTEXT_LIMITS } from '../config.js';
 import { parseMetricsOutput } from '../metrics.js';
 import * as fmt from '../output/format.js';
 
@@ -80,8 +81,8 @@ async function doGate(db: ReturnType<typeof getDb>, exp: Experiment, root: strin
   transition(exp.status as ExperimentStatus, ExperimentStatus.GATED);
 
   // Gather context for the gatekeeper
-  const synthesis = readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md'));
-  const fragility = readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'fragility.md'));
+  const synthesis = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md')), CONTEXT_LIMITS.synthesis);
+  const fragility = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'fragility.md')), CONTEXT_LIMITS.fragility);
   const structuralDeadEnds = exp.sub_type
     ? listStructuralDeadEndsBySubType(db, exp.sub_type)
     : listStructuralDeadEnds(db);
@@ -136,18 +137,17 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
   const deadEnds = exp.sub_type ? listDeadEndsBySubType(db, exp.sub_type) : listAllDeadEnds(db);
   const builderGuidance = getBuilderGuidance(db, exp.id);
 
-  const fragilityPath = path.join(root, 'docs', 'synthesis', 'fragility.md');
-  const fragility = fs.existsSync(fragilityPath) ? fs.readFileSync(fragilityPath, 'utf-8') : '';
-
-  const synthesisPath = path.join(root, 'docs', 'synthesis', 'current.md');
-  const synthesis = fs.existsSync(synthesisPath) ? fs.readFileSync(synthesisPath, 'utf-8') : '';
+  const fragility = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'fragility.md')), CONTEXT_LIMITS.fragility);
+  const synthesis = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md')), CONTEXT_LIMITS.synthesis);
 
   // Confirmed doubts from previous cycles — builder MUST address these
   const confirmedDoubts = getConfirmedDoubts(db, exp.id);
 
   // Framework-controlled metrics: capture baseline BEFORE build
+  // Skip if baseline already captured (e.g. by `majlis new --auto-baseline`)
   const config = loadConfig(root);
-  if (config.metrics?.command) {
+  const existingBaseline = getMetricsByExperimentAndPhase(db, exp.id, 'before');
+  if (config.metrics?.command && existingBaseline.length === 0) {
     try {
       const output = execSync(config.metrics.command, {
         cwd: root, encoding: 'utf-8', timeout: 60_000,
@@ -245,7 +245,7 @@ async function doChallenge(db: ReturnType<typeof getDb>, exp: Experiment, root: 
   } catch { /* no diff available */ }
   if (gitDiff.length > 8000) gitDiff = gitDiff.slice(0, 8000) + '\n[DIFF TRUNCATED]';
 
-  const synthesis = readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md'));
+  const synthesis = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md')), CONTEXT_LIMITS.synthesis);
 
   let taskPrompt = `Construct adversarial test cases for experiment ${exp.slug}: ${exp.hypothesis}`;
   if (gitDiff) {
@@ -280,10 +280,10 @@ async function doDoubt(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
   // Read the builder's experiment doc (the artifact, NOT reasoning chain — Tradition 3)
   const paddedNum = String(exp.id).padStart(3, '0');
   const expDocPath = path.join(root, 'docs', 'experiments', `${paddedNum}-${exp.slug}.md`);
-  const experimentDoc = readFileOrEmpty(expDocPath);
+  const experimentDoc = truncateContext(readFileOrEmpty(expDocPath), CONTEXT_LIMITS.experimentDoc);
 
   // Read synthesis for structural context
-  const synthesis = readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md'));
+  const synthesis = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md')), CONTEXT_LIMITS.synthesis);
 
   // Dead-ends — so critic can identify repeated patterns
   const deadEnds = exp.sub_type ? listDeadEndsBySubType(db, exp.sub_type) : listAllDeadEnds(db);
@@ -323,8 +323,8 @@ async function doDoubt(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
 async function doScout(db: ReturnType<typeof getDb>, exp: Experiment, root: string): Promise<void> {
   transition(exp.status as ExperimentStatus, ExperimentStatus.SCOUTED);
 
-  const synthesis = readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md'));
-  const fragility = readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'fragility.md'));
+  const synthesis = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md')), CONTEXT_LIMITS.synthesis);
+  const fragility = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'fragility.md')), CONTEXT_LIMITS.fragility);
 
   // Dead-ends — so scout searches for approaches that circumvent known structural constraints
   const deadEnds = exp.sub_type ? listDeadEndsBySubType(db, exp.sub_type) : listAllDeadEnds(db);
@@ -599,27 +599,3 @@ function ingestStructuredOutput(
   }
 }
 
-function readFileOrEmpty(filePath: string): string {
-  try {
-    return fs.readFileSync(filePath, 'utf-8');
-  } catch {
-    return '';
-  }
-}
-
-function loadConfig(projectRoot: string): MajlisConfig {
-  const configPath = path.join(projectRoot, '.majlis', 'config.json');
-  if (!fs.existsSync(configPath)) {
-    return {
-      project: { name: '', description: '', objective: '' },
-      cycle: {
-        compression_interval: 5,
-        circuit_breaker_threshold: 3,
-        require_doubt_before_verify: true,
-        require_challenge_before_verify: false,
-        auto_baseline_on_new_experiment: true,
-      },
-    } as MajlisConfig;
-  }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}

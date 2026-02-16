@@ -70,7 +70,7 @@ export async function spawnAgent(
   const root = projectRoot ?? findProjectRoot() ?? process.cwd();
 
   const taskPrompt = context.taskPrompt ?? `Perform your role as ${agentDef.name}.`;
-  const contextJson = JSON.stringify(context, null, 2);
+  const contextJson = JSON.stringify(context);
   const prompt = `Here is your context:\n\n\`\`\`json\n${contextJson}\n\`\`\`\n\n${taskPrompt}`;
 
   const turns = ROLE_MAX_TURNS[role] ?? 15;
@@ -118,7 +118,7 @@ export async function spawnSynthesiser(
 ): Promise<AgentResult> {
   const root = projectRoot ?? findProjectRoot() ?? process.cwd();
 
-  const contextJson = JSON.stringify(context, null, 2);
+  const contextJson = JSON.stringify(context);
   const taskPrompt = context.taskPrompt ?? 'Synthesise the findings into actionable builder guidance.';
   const prompt = `Here is your context:\n\n\`\`\`json\n${contextJson}\n\`\`\`\n\n${taskPrompt}`;
 
@@ -133,7 +133,7 @@ export async function spawnSynthesiser(
 
   const { text: markdown, costUsd, truncated } = await runQuery({
     prompt,
-    model: 'opus',
+    model: 'sonnet',
     tools: ['Read', 'Glob', 'Grep'],
     systemPrompt,
     cwd: root,

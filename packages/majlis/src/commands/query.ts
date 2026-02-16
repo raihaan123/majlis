@@ -10,7 +10,7 @@ import {
   getAllCircuitBreakerStates,
   listActiveExperiments,
 } from '../db/queries.js';
-import type { MajlisConfig } from '../types.js';
+import { loadConfig, getFlagValue } from '../config.js';
 import * as fmt from '../output/format.js';
 
 export async function query(
@@ -40,11 +40,9 @@ export async function query(
 }
 
 function queryDecisions(db: ReturnType<typeof getDb>, args: string[], isJson: boolean): void {
-  const levelIdx = args.indexOf('--level');
-  const level = levelIdx >= 0 ? args[levelIdx + 1] : undefined;
-
-  const expIdx = args.indexOf('--experiment');
-  const experimentId = expIdx >= 0 ? Number(args[expIdx + 1]) : undefined;
+  const level = getFlagValue(args, '--level');
+  const expIdStr = getFlagValue(args, '--experiment');
+  const experimentId = expIdStr !== undefined ? Number(expIdStr) : undefined;
 
   const decisions = listAllDecisions(db, level, experimentId);
 
@@ -70,11 +68,8 @@ function queryDecisions(db: ReturnType<typeof getDb>, args: string[], isJson: bo
 }
 
 function queryDeadEnds(db: ReturnType<typeof getDb>, args: string[], isJson: boolean): void {
-  const subTypeIdx = args.indexOf('--sub-type');
-  const subType = subTypeIdx >= 0 ? args[subTypeIdx + 1] : undefined;
-
-  const searchIdx = args.indexOf('--search');
-  const searchTerm = searchIdx >= 0 ? args[searchIdx + 1] : undefined;
+  const subType = getFlagValue(args, '--sub-type');
+  const searchTerm = getFlagValue(args, '--search');
 
   let deadEnds;
   if (subType) {
@@ -210,10 +205,3 @@ function checkCommit(db: ReturnType<typeof getDb>): void {
   }
 }
 
-function loadConfig(projectRoot: string): MajlisConfig {
-  const configPath = path.join(projectRoot, '.majlis', 'config.json');
-  if (!fs.existsSync(configPath)) {
-    return { cycle: { circuit_breaker_threshold: 3 } } as MajlisConfig;
-  }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}

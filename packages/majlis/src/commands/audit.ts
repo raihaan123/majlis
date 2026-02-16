@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import { listAllDeadEnds, listAllExperiments, getAllCircuitBreakerStates } from '../db/queries.js';
 import { spawnAgent } from '../agents/spawn.js';
-import type { MajlisConfig } from '../types.js';
+import { loadConfig, readFileOrEmpty } from '../config.js';
 import * as fmt from '../output/format.js';
 
 /**
@@ -33,8 +33,7 @@ export async function audit(args: string[]): Promise<void> {
     }
   }
 
-  const synthesisPath = path.join(root, 'docs', 'synthesis', 'current.md');
-  const synthesis = fs.existsSync(synthesisPath) ? fs.readFileSync(synthesisPath, 'utf-8') : '';
+  const synthesis = readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md'));
 
   fmt.header('Maqasid Check — Purpose Audit');
 
@@ -72,10 +71,3 @@ export async function audit(args: string[]): Promise<void> {
   fmt.success('Purpose audit complete. Review the output above.');
 }
 
-function loadConfig(projectRoot: string): MajlisConfig {
-  const configPath = path.join(projectRoot, '.majlis', 'config.json');
-  if (!fs.existsSync(configPath)) {
-    return { project: { name: '', description: '', objective: '' }, cycle: { circuit_breaker_threshold: 3 } } as MajlisConfig;
-  }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}

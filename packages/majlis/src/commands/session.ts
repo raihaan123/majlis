@@ -5,6 +5,7 @@ import {
   getActiveSession,
   getLatestExperiment,
 } from '../db/queries.js';
+import { getFlagValue } from '../config.js';
 import * as fmt from '../output/format.js';
 
 export async function session(args: string[]): Promise<void> {
@@ -48,15 +49,10 @@ export async function session(args: string[]): Promise<void> {
       throw new Error('No active session to end.');
     }
 
-    // Parse flags
-    const accomplishedIdx = args.indexOf('--accomplished');
-    const accomplished = accomplishedIdx >= 0 ? args[accomplishedIdx + 1] : null;
-
-    const unfinishedIdx = args.indexOf('--unfinished');
-    const unfinished = unfinishedIdx >= 0 ? args[unfinishedIdx + 1] : null;
-
-    const fragilityIdx = args.indexOf('--fragility');
-    const fragility = fragilityIdx >= 0 ? args[fragilityIdx + 1] : null;
+    // Parse flags (bounds-checked)
+    const accomplished = getFlagValue(args, '--accomplished') ?? null;
+    const unfinished = getFlagValue(args, '--unfinished') ?? null;
+    const fragility = getFlagValue(args, '--fragility') ?? null;
 
     endSession(db, active.id, accomplished, unfinished, fragility);
     fmt.success(`Session ended: "${active.intent}"`);

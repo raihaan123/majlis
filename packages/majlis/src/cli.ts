@@ -8,6 +8,16 @@ const VERSION = JSON.parse(
 ).version;
 
 async function main(): Promise<void> {
+  // Graceful shutdown on Ctrl+C
+  let sigintCount = 0;
+  process.on('SIGINT', () => {
+    sigintCount++;
+    if (sigintCount >= 2) process.exit(130);
+    const { requestShutdown } = require('./shutdown.js');
+    requestShutdown();
+    console.error('\n\x1b[33m[majlis] Interrupt received. Finishing current step...\x1b[0m');
+  });
+
   const args = process.argv.slice(2);
 
   if (args.includes('--version') || args.includes('-v')) {

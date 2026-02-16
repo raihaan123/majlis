@@ -1,5 +1,3 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import {
   listActiveExperiments,
@@ -9,6 +7,7 @@ import {
   listAllDecisions,
 } from '../db/queries.js';
 import type { MajlisConfig } from '../types.js';
+import { loadConfig } from '../config.js';
 import * as fmt from '../output/format.js';
 
 export async function status(isJson: boolean): Promise<void> {
@@ -114,10 +113,3 @@ function buildSummary(
   return parts.join('. ');
 }
 
-function loadConfig(projectRoot: string): MajlisConfig {
-  const configPath = path.join(projectRoot, '.majlis', 'config.json');
-  if (!fs.existsSync(configPath)) {
-    throw new Error('Missing .majlis/config.json. Run `majlis init` first.');
-  }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}

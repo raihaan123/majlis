@@ -9,7 +9,7 @@ import {
   updateExperimentStatus,
   insertDeadEnd,
 } from '../db/queries.js';
-import type { MajlisConfig } from '../types.js';
+import { loadConfig, getFlagValue } from '../config.js';
 import * as fmt from '../output/format.js';
 
 export async function newExperiment(args: string[]): Promise<void> {
@@ -50,9 +50,8 @@ export async function newExperiment(args: string[]): Promise<void> {
     fmt.warn(`Could not create branch ${branch} — continuing without git branch.`);
   }
 
-  // Parse optional flags
-  const subTypeIdx = args.indexOf('--sub-type');
-  const subType = subTypeIdx >= 0 ? args[subTypeIdx + 1] : null;
+  // Parse optional flags (bounds-checked)
+  const subType = getFlagValue(args, '--sub-type') ?? null;
 
   // Create DB entry
   const exp = createExperiment(db, slug, branch, hypothesis, subType, null);
@@ -105,8 +104,7 @@ export async function revert(args: string[]): Promise<void> {
   }
 
   // Record dead-end
-  const reasonIdx = args.indexOf('--reason');
-  const reason = reasonIdx >= 0 ? args[reasonIdx + 1] : 'Manually reverted';
+  const reason = getFlagValue(args, '--reason') ?? 'Manually reverted';
   const category = args.includes('--structural') ? 'structural' as const : 'procedural' as const;
 
   insertDeadEnd(
@@ -151,10 +149,3 @@ function slugify(text: string): string {
     .slice(0, 50);
 }
 
-function loadConfig(projectRoot: string): MajlisConfig {
-  const configPath = path.join(projectRoot, '.majlis', 'config.json');
-  if (!fs.existsSync(configPath)) {
-    return { cycle: { auto_baseline_on_new_experiment: false } } as MajlisConfig;
-  }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}

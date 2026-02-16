@@ -94,11 +94,13 @@ export async function resolve(
       }, projectRoot);
 
       const guidanceText = guidance.structured?.guidance ?? guidance.output;
-      storeBuilderGuidance(db, exp.id, guidanceText);
-      updateExperimentStatus(db, exp.id, 'building');
-      if (exp.sub_type) {
-        incrementSubTypeFailure(db, exp.sub_type, exp.id, 'weak');
-      }
+      db.transaction(() => {
+        storeBuilderGuidance(db, exp.id, guidanceText);
+        updateExperimentStatus(db, exp.id, 'building');
+        if (exp.sub_type) {
+          incrementSubTypeFailure(db, exp.sub_type, exp.id, 'weak');
+        }
+      })();
       fmt.warn(`Experiment ${exp.slug} CYCLING BACK (weak). Guidance generated for builder.`);
       break;
     }
@@ -109,20 +111,21 @@ export async function resolve(
       const rejectedComponents = grades.filter(g => g.grade === 'rejected');
       const whyFailed = rejectedComponents.map(r => r.notes ?? 'rejected').join('; ');
 
-      insertDeadEnd(
-        db,
-        exp.id,
-        exp.hypothesis ?? exp.slug,
-        whyFailed,
-        `Approach rejected: ${whyFailed}`,
-        exp.sub_type,
-        'structural',
-      );
-
-      updateExperimentStatus(db, exp.id, 'dead_end');
-      if (exp.sub_type) {
-        incrementSubTypeFailure(db, exp.sub_type, exp.id, 'rejected');
-      }
+      db.transaction(() => {
+        insertDeadEnd(
+          db,
+          exp.id,
+          exp.hypothesis ?? exp.slug,
+          whyFailed,
+          `Approach rejected: ${whyFailed}`,
+          exp.sub_type,
+          'structural',
+        );
+        updateExperimentStatus(db, exp.id, 'dead_end');
+        if (exp.sub_type) {
+          incrementSubTypeFailure(db, exp.sub_type, exp.id, 'rejected');
+        }
+      })();
       fmt.info(`Experiment ${exp.slug} DEAD-ENDED (rejected). Constraint recorded.`);
       break;
     }

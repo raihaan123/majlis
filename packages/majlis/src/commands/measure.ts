@@ -1,5 +1,3 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { execSync } from 'node:child_process';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import {
@@ -8,7 +6,7 @@ import {
   insertMetric,
 } from '../db/queries.js';
 import { compareMetrics, parseMetricsOutput } from '../metrics.js';
-import type { MajlisConfig } from '../types.js';
+import { loadConfig, getFlagValue } from '../config.js';
 import * as fmt from '../output/format.js';
 
 export async function baseline(args: string[]): Promise<void> {
@@ -27,10 +25,10 @@ async function captureMetrics(phase: string, args: string[]): Promise<void> {
   const config = loadConfig(root);
 
   // Get experiment
-  const expIdIdx = args.indexOf('--experiment');
+  const expIdStr = getFlagValue(args, '--experiment');
   let exp;
-  if (expIdIdx >= 0) {
-    exp = getExperimentById(db, Number(args[expIdIdx + 1]));
+  if (expIdStr !== undefined) {
+    exp = getExperimentById(db, Number(expIdStr));
   } else {
     exp = getLatestExperiment(db);
   }
@@ -94,10 +92,10 @@ export async function compare(args: string[], isJson: boolean): Promise<void> {
   const config = loadConfig(root);
 
   // Get experiment
-  const expIdIdx = args.indexOf('--experiment');
+  const expIdStr = getFlagValue(args, '--experiment');
   let exp;
-  if (expIdIdx >= 0) {
-    exp = getExperimentById(db, Number(args[expIdIdx + 1]));
+  if (expIdStr !== undefined) {
+    exp = getExperimentById(db, Number(expIdStr));
   } else {
     exp = getLatestExperiment(db);
   }
@@ -144,10 +142,3 @@ function formatDelta(delta: number): string {
   return `${prefix}${delta.toFixed(4)}`;
 }
 
-function loadConfig(projectRoot: string): MajlisConfig {
-  const configPath = path.join(projectRoot, '.majlis', 'config.json');
-  if (!fs.existsSync(configPath)) {
-    throw new Error('Missing .majlis/config.json. Run `majlis init` first.');
-  }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}

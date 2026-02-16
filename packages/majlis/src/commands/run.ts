@@ -18,6 +18,8 @@ import { next } from './next.js';
 import { cycle } from './cycle.js';
 import { spawnSynthesiser } from '../agents/spawn.js';
 import type { MajlisConfig, Experiment } from '../types.js';
+import { loadConfig, readFileOrEmpty, truncateContext, CONTEXT_LIMITS } from '../config.js';
+import { isShutdownRequested } from '../shutdown.js';
 import * as fmt from '../output/format.js';
 
 /**
@@ -41,10 +43,17 @@ export async function run(args: string[]): Promise<void> {
 
   let experimentCount = 0;
   let stepCount = 0;
+  let consecutiveFailures = 0;
+  const usedHypotheses = new Set<string>();
 
   fmt.header(`Autonomous Mode — ${goal}`);
 
   while (stepCount < MAX_STEPS && experimentCount < MAX_EXPERIMENTS) {
+    if (isShutdownRequested()) {
+      fmt.warn('Shutdown requested. Stopping autonomous mode.');
+      break;
+    }
+
     stepCount++;
 
     // Get the active experiment
@@ -75,6 +84,13 @@ export async function run(args: string[]): Promise<void> {
         break;
       }
 
+      // Guard against duplicate hypotheses
+      if (usedHypotheses.has(hypothesis)) {
+        fmt.warn(`Planner returned duplicate hypothesis: "${hypothesis.slice(0, 80)}". Stopping.`);
+        break;
+      }
+      usedHypotheses.add(hypothesis);
+
       fmt.info(`Next hypothesis: ${hypothesis}`);
 
       // Create the experiment programmatically
@@ -96,14 +112,23 @@ export async function run(args: string[]): Promise<void> {
     fmt.info(`[Step ${stepCount}] ${exp.slug}: ${exp.status}`);
     try {
       await next([exp.slug], false);
+      consecutiveFailures = 0;
     } catch (err) {
+      consecutiveFailures++;
       const message = err instanceof Error ? err.message : String(err);
       fmt.warn(`Step failed for ${exp.slug}: ${message}`);
       try {
         insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug, message,
           `Process failure: ${message}`, exp.sub_type, 'procedural');
         updateExperimentStatus(db, exp.id, 'dead_end');
-      } catch { /* if even this fails, MAX_STEPS will stop the loop */ }
+      } catch (innerErr) {
+        const innerMsg = innerErr instanceof Error ? innerErr.message : String(innerErr);
+        fmt.warn(`Could not record dead-end: ${innerMsg}`);
+      }
+      if (consecutiveFailures >= 3) {
+        fmt.warn(`${consecutiveFailures} consecutive failures. Stopping autonomous mode.`);
+        break;
+      }
     }
   }
 
@@ -126,10 +151,10 @@ async function deriveNextHypothesis(
   root: string,
   db: ReturnType<typeof getDb>,
 ): Promise<string | null> {
-  // Gather context
-  const synthesis = readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md'));
-  const fragility = readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'fragility.md'));
-  const deadEndsDoc = readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'dead-ends.md'));
+  // Gather context (safety-net truncation — compressor should keep these small)
+  const synthesis = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md')), CONTEXT_LIMITS.synthesis);
+  const fragility = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'fragility.md')), CONTEXT_LIMITS.fragility);
+  const deadEndsDoc = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'dead-ends.md')), CONTEXT_LIMITS.deadEnds);
   const deadEnds = listAllDeadEnds(db);
   const config = loadConfig(root);
 
@@ -290,14 +315,6 @@ function createNewExperiment(
   return exp;
 }
 
-function readFileOrEmpty(filePath: string): string {
-  try {
-    return fs.readFileSync(filePath, 'utf-8');
-  } catch {
-    return '';
-  }
-}
-
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -306,19 +323,3 @@ function slugify(text: string): string {
     .slice(0, 50);
 }
 
-function loadConfig(projectRoot: string): MajlisConfig {
-  const configPath = path.join(projectRoot, '.majlis', 'config.json');
-  if (!fs.existsSync(configPath)) {
-    return {
-      project: { name: '', description: '', objective: '' },
-      cycle: {
-        compression_interval: 5,
-        circuit_breaker_threshold: 3,
-        require_doubt_before_verify: true,
-        require_challenge_before_verify: false,
-        auto_baseline_on_new_experiment: true,
-      },
-    } as MajlisConfig;
-  }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}

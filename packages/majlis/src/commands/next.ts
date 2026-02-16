@@ -1,5 +1,3 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import {
   getExperimentBySlug,
@@ -8,11 +6,13 @@ import {
   hasDoubts as dbHasDoubts,
   checkCircuitBreaker,
   updateExperimentStatus,
+  insertDeadEnd,
 } from '../db/queries.js';
 import { validNext, determineNextStep, isTerminal } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
 import { hasChallenges } from '../db/queries.js';
 import type { MajlisConfig, Experiment } from '../types.js';
+import { loadConfig } from '../config.js';
 import { cycle, resolveCmd } from './cycle.js';
 import { audit } from './audit.js';
 import * as fmt from '../output/format.js';
@@ -65,10 +65,15 @@ async function runNextStep(
     return;
   }
 
-  // Check circuit breakers
+  // Check circuit breakers — dead-end the experiment to prevent further cycling
   if (exp.sub_type && checkCircuitBreaker(db, exp.sub_type, config.cycle.circuit_breaker_threshold)) {
     fmt.warn(`Circuit breaker: ${exp.sub_type} has ${config.cycle.circuit_breaker_threshold}+ failures.`);
-    fmt.warn('Triggering Maqasid Check (purpose audit).');
+    insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug,
+      `Circuit breaker tripped for ${exp.sub_type}`,
+      `Sub-type ${exp.sub_type} exceeded ${config.cycle.circuit_breaker_threshold} failures`,
+      exp.sub_type, 'procedural');
+    updateExperimentStatus(db, exp.id, 'dead_end');
+    fmt.warn('Experiment dead-ended. Triggering Maqasid Check (purpose audit).');
     await audit([config.project?.objective ?? '']);
     return;
   }
@@ -128,9 +133,14 @@ async function runAutoLoop(
       break;
     }
 
-    // Check circuit breaker
+    // Check circuit breaker — dead-end the experiment to prevent further cycling
     if (exp.sub_type && checkCircuitBreaker(db, exp.sub_type, config.cycle.circuit_breaker_threshold)) {
       fmt.warn(`Circuit breaker tripped for ${exp.sub_type}. Stopping auto mode.`);
+      insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug,
+        `Circuit breaker tripped for ${exp.sub_type}`,
+        `Sub-type ${exp.sub_type} exceeded ${config.cycle.circuit_breaker_threshold} failures`,
+        exp.sub_type, 'procedural');
+      updateExperimentStatus(db, exp.id, 'dead_end');
       await audit([config.project?.objective ?? '']);
       break;
     }
@@ -198,19 +208,3 @@ async function executeStep(
   }
 }
 
-function loadConfig(projectRoot: string): MajlisConfig {
-  const configPath = path.join(projectRoot, '.majlis', 'config.json');
-  if (!fs.existsSync(configPath)) {
-    return {
-      project: { name: '', description: '', objective: '' },
-      cycle: {
-        compression_interval: 5,
-        circuit_breaker_threshold: 3,
-        require_doubt_before_verify: true,
-        require_challenge_before_verify: false,
-        auto_baseline_on_new_experiment: true,
-      },
-    } as MajlisConfig;
-  }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}
