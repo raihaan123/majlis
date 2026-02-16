@@ -29,13 +29,27 @@ jobs:
       - run: npm test
 
       - name: Publish majlis
-        run: npm publish --provenance --access public
         working-directory: packages/majlis
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version 2>/dev/null; then
+            echo "${PKG_NAME}@${PKG_VERSION} already published, skipping."
+          else
+            npm publish --provenance --access public
+          fi
 
       - name: Publish create-majlis
-        run: npm publish --provenance --access public
         working-directory: packages/create-majlis
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version 2>/dev/null; then
+            echo "${PKG_NAME}@${PKG_VERSION} already published, skipping."
+          else
+            npm publish --provenance --access public
+          fi
