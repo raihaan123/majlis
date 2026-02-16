@@ -102,9 +102,13 @@ describe('transition()', () => {
 
   it('throws on self-transitions that are not in the map', () => {
     assert.throws(
-      () => transition(ExperimentStatus.BUILDING, ExperimentStatus.BUILDING),
+      () => transition(ExperimentStatus.BUILT, ExperimentStatus.BUILT),
       /Invalid transition/,
     );
+  });
+
+  it('allows building → building self-loop for truncation retry', () => {
+    assert.equal(transition(ExperimentStatus.BUILDING, ExperimentStatus.BUILDING), ExperimentStatus.BUILDING);
   });
 });
 

@@ -15,7 +15,7 @@ import {
 } from '../db/queries.js';
 import { transition } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
-import { spawnAgent } from '../agents/spawn.js';
+import { spawnAgent, spawnRecovery } from '../agents/spawn.js';
 import { resolve as resolveExperiment } from '../resolve.js';
 import type { Experiment } from '../types.js';
 import type { StructuredOutput } from '../agents/types.js';
@@ -105,8 +105,18 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
   // Ingest structured output
   ingestStructuredOutput(db, exp.id, result.structured);
 
-  updateExperimentStatus(db, exp.id, 'built');
-  fmt.success(`Build complete for ${exp.slug}. Run \`majlis doubt\` or \`majlis challenge\` next.`);
+  if (result.truncated && !result.structured) {
+    // Builder hit max turns without producing structured output.
+    // Run recovery agent to clean up the experiment doc, then stay at 'building'.
+    fmt.warn(`Builder was truncated (hit max turns) without producing structured output.`);
+    await spawnRecovery('builder', result.output, {
+      experiment: { id: exp.id, slug: exp.slug, hypothesis: exp.hypothesis, status: 'building', sub_type: exp.sub_type, builder_guidance: null },
+    }, root);
+    fmt.warn(`Experiment stays at 'building'. Run \`majlis build\` to retry or \`majlis revert\` to abandon.`);
+  } else {
+    updateExperimentStatus(db, exp.id, 'built');
+    fmt.success(`Build complete for ${exp.slug}. Run \`majlis doubt\` or \`majlis challenge\` next.`);
+  }
 }
 
 async function doChallenge(db: ReturnType<typeof getDb>, exp: Experiment, root: string): Promise<void> {
@@ -125,8 +135,12 @@ async function doChallenge(db: ReturnType<typeof getDb>, exp: Experiment, root: 
   }, root);
 
   ingestStructuredOutput(db, exp.id, result.structured);
-  updateExperimentStatus(db, exp.id, 'challenged');
-  fmt.success(`Challenge complete for ${exp.slug}. Run \`majlis doubt\` or \`majlis verify\` next.`);
+  if (result.truncated && !result.structured) {
+    fmt.warn(`Adversary was truncated without structured output. Experiment stays at current status.`);
+  } else {
+    updateExperimentStatus(db, exp.id, 'challenged');
+    fmt.success(`Challenge complete for ${exp.slug}. Run \`majlis doubt\` or \`majlis verify\` next.`);
+  }
 }
 
 async function doDoubt(db: ReturnType<typeof getDb>, exp: Experiment, root: string): Promise<void> {
@@ -145,8 +159,12 @@ async function doDoubt(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
   }, root);
 
   ingestStructuredOutput(db, exp.id, result.structured);
-  updateExperimentStatus(db, exp.id, 'doubted');
-  fmt.success(`Doubt pass complete for ${exp.slug}. Run \`majlis challenge\` or \`majlis verify\` next.`);
+  if (result.truncated && !result.structured) {
+    fmt.warn(`Critic was truncated without structured output. Experiment stays at current status.`);
+  } else {
+    updateExperimentStatus(db, exp.id, 'doubted');
+    fmt.success(`Doubt pass complete for ${exp.slug}. Run \`majlis challenge\` or \`majlis verify\` next.`);
+  }
 }
 
 async function doScout(db: ReturnType<typeof getDb>, exp: Experiment, root: string): Promise<void> {
@@ -207,6 +225,11 @@ async function doVerify(db: ReturnType<typeof getDb>, exp: Experiment, root: str
   }, root);
 
   ingestStructuredOutput(db, exp.id, result.structured);
+
+  if (result.truncated && !result.structured) {
+    fmt.warn(`Verifier was truncated without structured output. Experiment stays at 'verifying'.`);
+    return;
+  }
 
   // Process doubt resolutions from verifier output
   if (result.structured?.doubt_resolutions) {

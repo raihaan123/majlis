@@ -75,7 +75,7 @@ export async function spawnAgent(
   const turns = ROLE_MAX_TURNS[role] ?? 15;
   console.log(`[${role}] Spawning (model: ${agentDef.model}, maxTurns: ${turns})...`);
 
-  const { text: markdown, costUsd } = await runQuery({
+  const { text: markdown, costUsd, truncated } = await runQuery({
     prompt,
     model: agentDef.model,
     tools: agentDef.tools,
@@ -85,7 +85,7 @@ export async function spawnAgent(
     label: role,
   });
 
-  console.log(`[${role}] Complete (cost: $${costUsd.toFixed(4)})`);
+  console.log(`[${role}] Complete (cost: $${costUsd.toFixed(4)}${truncated ? ', TRUNCATED' : ''})`);
 
   // Write artifact to docs/ directory
   const artifactPath = writeArtifact(role, context, markdown, root);
@@ -96,7 +96,7 @@ export async function spawnAgent(
   // Extract structured data via 3-tier parsing
   const structured = await extractStructuredData(role, markdown);
 
-  return { output: markdown, structured };
+  return { output: markdown, structured, truncated };
 }
 
 /**
@@ -122,7 +122,7 @@ export async function spawnSynthesiser(
 
   console.log(`[synthesiser] Spawning (maxTurns: 5)...`);
 
-  const { text: markdown, costUsd } = await runQuery({
+  const { text: markdown, costUsd, truncated } = await runQuery({
     prompt,
     model: 'opus',
     tools: ['Read', 'Glob', 'Grep'],
@@ -136,7 +136,71 @@ export async function spawnSynthesiser(
 
   // The synthesiser's output IS the guidance — skip 3-tier extraction
   // (it never outputs <!-- majlis-json --> reliably, wasting a Haiku call).
-  return { output: markdown, structured: { guidance: markdown } };
+  return { output: markdown, structured: { guidance: markdown }, truncated };
+}
+
+/**
+ * Spawn a recovery agent to clean up after a truncated agent run.
+ * Reads the partial output, the experiment doc, and writes a clean
+ * experiment doc with whatever is salvageable. Minimal turns, Haiku model.
+ */
+export async function spawnRecovery(
+  role: string,
+  partialOutput: string,
+  context: AgentContext,
+  projectRoot?: string,
+): Promise<void> {
+  const root = projectRoot ?? findProjectRoot() ?? process.cwd();
+  const expSlug = context.experiment?.slug ?? 'unknown';
+
+  console.log(`[recovery] Cleaning up after truncated ${role} for ${expSlug}...`);
+
+  const expDocPath = path.join(root, 'docs', 'experiments',
+    `${String(context.experiment?.id ?? 0).padStart(3, '0')}-${expSlug}.md`);
+
+  // Read the experiment doc template for structure reference
+  const templatePath = path.join(root, 'docs', 'experiments', '_TEMPLATE.md');
+  const template = fs.existsSync(templatePath) ? fs.readFileSync(templatePath, 'utf-8') : '';
+
+  // Read the current experiment doc (may have been partially edited by truncated agent)
+  const currentDoc = fs.existsSync(expDocPath) ? fs.readFileSync(expDocPath, 'utf-8') : '';
+
+  const prompt = `The ${role} agent was truncated (hit max turns) while working on experiment "${expSlug}".
+
+Here is the partial agent output (reasoning + tool calls):
+<partial_output>
+${partialOutput.slice(-3000)}
+</partial_output>
+
+Here is the current experiment doc:
+<current_doc>
+${currentDoc}
+</current_doc>
+
+Here is the template that the experiment doc should follow:
+<template>
+${template}
+</template>
+
+Your job: Write a CLEAN experiment doc to ${expDocPath} using the Write tool.
+- Keep any valid content from the current doc
+- Fill in what you can infer from the partial output
+- Mark incomplete sections with "[TRUNCATED — ${role} did not finish]"
+- The doc MUST have the <!-- majlis-json --> block, even if decisions are empty
+- Do NOT include agent reasoning or thinking — only structured experiment content
+- Be concise. This is cleanup, not new work.`;
+
+  const { text: _markdown } = await runQuery({
+    prompt,
+    model: 'haiku',
+    tools: ['Read', 'Write'],
+    systemPrompt: `You are a Recovery Agent. You clean up experiment docs after truncated agent runs. Write clean, structured docs. Never include agent reasoning or monologue.`,
+    cwd: root,
+    maxTurns: 5,
+    label: 'recovery',
+  });
+
+  console.log(`[recovery] Cleanup complete for ${expSlug}.`);
 }
 
 const DIM = '\x1b[2m';
@@ -155,7 +219,8 @@ async function runQuery(opts: {
   cwd: string;
   maxTurns?: number;
   label?: string;
-}): Promise<{ text: string; costUsd: number }> {
+}): Promise<{ text: string; costUsd: number; truncated: boolean }> {
+  let truncated = false;
   const tag = opts.label ?? 'majlis';
   const conversation = query({
     prompt: opts.prompt,
@@ -211,8 +276,8 @@ async function runQuery(opts: {
       if (message.subtype === 'success') {
         costUsd = message.total_cost_usd;
       } else if (message.subtype === 'error_max_turns') {
-        // Agent hit turn limit — return partial output instead of throwing.
-        // The cycle can still use whatever the agent produced.
+        // Agent hit turn limit — flag as truncated so the cycle can handle gracefully.
+        truncated = true;
         costUsd = 'total_cost_usd' in message ? (message as any).total_cost_usd : 0;
         console.warn(`[${tag}] Hit max turns (${turnCount}). Returning partial output.`);
       } else {
@@ -222,7 +287,7 @@ async function runQuery(opts: {
     }
   }
 
-  return { text: textParts.join('\n\n'), costUsd };
+  return { text: textParts.join('\n\n'), costUsd, truncated };
 }
 
 /**
@@ -271,26 +336,20 @@ function writeArtifact(
   const dir = dirMap[role];
   if (!dir) return null;
 
+  // Builder and compressor manage their own files via Write/Edit tool calls.
+  // Writing the raw agent output here would OVERWRITE their clean docs with
+  // the full monologue (all reasoning text between tool calls).
+  if (role === 'builder' || role === 'compressor') return null;
+
   const fullDir = path.join(projectRoot, dir);
   if (!fs.existsSync(fullDir)) {
     fs.mkdirSync(fullDir, { recursive: true });
   }
 
-  // For compressor, write to current.md
-  if (role === 'compressor') {
-    const target = path.join(fullDir, 'current.md');
-    fs.writeFileSync(target, markdown);
-    return target;
-  }
-
-  // For other roles, create a numbered file
+  // Create a numbered file for critic, adversary, verifier, reframer, scout
   const expSlug = context.experiment?.slug ?? 'general';
-  const existing = fs.readdirSync(fullDir).filter(f => f.endsWith('.md') && !f.startsWith('_'));
-  const nextNum = String(context.experiment?.id ?? existing.length + 1).padStart(3, '0');
-
-  const filename = role === 'builder'
-    ? `${nextNum}-${expSlug}.md`
-    : `${nextNum}-${role}-${expSlug}.md`;
+  const nextNum = String(context.experiment?.id ?? 1).padStart(3, '0');
+  const filename = `${nextNum}-${role}-${expSlug}.md`;
 
   const target = path.join(fullDir, filename);
   fs.writeFileSync(target, markdown);

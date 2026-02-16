@@ -19,7 +19,7 @@ export enum ExperimentStatus {
 export const TRANSITIONS: Record<ExperimentStatus, ExperimentStatus[]> = {
   [ExperimentStatus.CLASSIFIED]:  [ExperimentStatus.REFRAMED, ExperimentStatus.BUILDING],
   [ExperimentStatus.REFRAMED]:    [ExperimentStatus.BUILDING],
-  [ExperimentStatus.BUILDING]:    [ExperimentStatus.BUILT],
+  [ExperimentStatus.BUILDING]:    [ExperimentStatus.BUILT, ExperimentStatus.BUILDING],  // self-loop for retry after truncation
   [ExperimentStatus.BUILT]:       [ExperimentStatus.CHALLENGED, ExperimentStatus.DOUBTED],
   [ExperimentStatus.CHALLENGED]:  [ExperimentStatus.DOUBTED, ExperimentStatus.VERIFYING],
   [ExperimentStatus.DOUBTED]:     [ExperimentStatus.CHALLENGED, ExperimentStatus.SCOUTED, ExperimentStatus.VERIFYING],

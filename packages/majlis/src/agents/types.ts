@@ -10,6 +10,7 @@ export interface AgentDefinition {
 export interface AgentResult {
   output: string;
   structured: StructuredOutput | null;
+  truncated: boolean;
 }
 
 export interface StructuredOutput {
