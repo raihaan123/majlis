@@ -40,6 +40,17 @@ export function loadAgentDefinition(role: string, projectRoot?: string): AgentDe
   return { name, model, tools, systemPrompt: body };
 }
 
+/** Per-role turn limits — hard cap to prevent agent spirals. */
+const ROLE_MAX_TURNS: Record<string, number> = {
+  builder: 15,
+  critic: 12,
+  adversary: 12,
+  verifier: 15,
+  compressor: 15,
+  reframer: 12,
+  scout: 12,
+};
+
 function extractYamlField(yaml: string, field: string): string | null {
   const match = yaml.match(new RegExp(`^${field}:\\s*(.+)$`, 'm'));
   return match ? match[1].trim() : null;
@@ -61,7 +72,8 @@ export async function spawnAgent(
   const contextJson = JSON.stringify(context, null, 2);
   const prompt = `Here is your context:\n\n\`\`\`json\n${contextJson}\n\`\`\`\n\n${taskPrompt}`;
 
-  console.log(`[majlis] Spawning ${role} agent (model: ${agentDef.model})...`);
+  const turns = ROLE_MAX_TURNS[role] ?? 15;
+  console.log(`[majlis] Spawning ${role} agent (model: ${agentDef.model}, maxTurns: ${turns})...`);
 
   const { text: markdown, costUsd } = await runQuery({
     prompt,
@@ -69,6 +81,7 @@ export async function spawnAgent(
     tools: agentDef.tools,
     systemPrompt: agentDef.systemPrompt,
     cwd: root,
+    maxTurns: turns,
   });
 
   console.log(`[majlis] ${role} agent complete (cost: $${costUsd.toFixed(4)})`);
@@ -100,11 +113,11 @@ export async function spawnSynthesiser(
   const prompt = `Here is your context:\n\n\`\`\`json\n${contextJson}\n\`\`\`\n\n${taskPrompt}`;
 
   const systemPrompt =
-    'You are a Synthesis Agent. Your job is to take a verification report, confirmed doubts, ' +
-    'and adversarial test results, and compress them into specific, actionable guidance for ' +
-    'the builder\'s next attempt. Be concrete: which decisions failed, which assumptions broke, ' +
-    'what constraints must the next approach satisfy. Output a \'guidance\' field in JSON ' +
-    'wrapped in a <!-- majlis-json --> block.';
+    'You are a Synthesis Agent. Be concrete: which decisions failed, which assumptions broke, ' +
+    'what constraints must the next approach satisfy. ' +
+    'CRITICAL: Your LAST line of output MUST be a <!-- majlis-json --> block. ' +
+    'The framework parses this programmatically — if you omit it, the pipeline breaks. ' +
+    'Format: <!-- majlis-json {"guidance": "your guidance here"} -->';
 
   console.log(`[majlis] Spawning synthesiser micro-agent...`);
 
@@ -114,6 +127,7 @@ export async function spawnSynthesiser(
     tools: ['Read', 'Glob', 'Grep'],
     systemPrompt,
     cwd: root,
+    maxTurns: 5,
   });
 
   console.log(`[majlis] Synthesiser complete (cost: $${costUsd.toFixed(4)})`);
@@ -137,6 +151,7 @@ async function runQuery(opts: {
   tools: string[];
   systemPrompt: string;
   cwd: string;
+  maxTurns?: number;
 }): Promise<{ text: string; costUsd: number }> {
   const conversation = query({
     prompt: opts.prompt,
@@ -151,7 +166,7 @@ async function runQuery(opts: {
       cwd: opts.cwd,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      maxTurns: 30,
+      maxTurns: opts.maxTurns ?? 15,
       persistSession: false,
       settingSources: ['project'],
     },

@@ -180,6 +180,9 @@ async function executeStep(
       break;
     case ExperimentStatus.COMPRESSED:
       await cycle('compress', []);
+      // Compression is session-level but the experiment status needs advancing
+      updateExperimentStatus(getDb(root), exp.id, 'compressed');
+      fmt.info(`Experiment ${exp.slug} compressed.`);
       break;
     case ExperimentStatus.REFRAMED:
       // Reframing is session-level (already done before experiment creation).

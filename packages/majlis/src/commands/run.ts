@@ -9,6 +9,7 @@ import {
   getSessionsSinceCompression,
   createExperiment,
   getExperimentBySlug,
+  updateExperimentStatus,
 } from '../db/queries.js';
 import { isTerminal } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
@@ -159,14 +160,19 @@ ${deadEnds.map(d => `- ${d.approach}: ${d.why_failed} [constraint: ${d.structura
 
 ## Your Task
 1. Assess: based on the metrics and synthesis, has the goal been met? Be specific.
-2. If YES — output: <!-- majlis-json {"goal_met": true, "hypothesis": null} -->
+2. If YES — output the JSON block below with goal_met: true.
 3. If NO — propose the SINGLE most promising next experiment hypothesis.
-   - It must NOT repeat a dead-ended approach
+   - It must NOT repeat a dead-ended approach (check the dead-end registry!)
    - It should attack the weakest point revealed by synthesis/fragility
-   - It should be specific and actionable (not vague)
-   - Output: <!-- majlis-json {"goal_met": false, "hypothesis": "your hypothesis here"} -->
+   - It must be specific and actionable — name the exact code/function/mechanism to change
+   - The hypothesis should be a single sentence describing what to do, e.g.:
+     "Activate addSeamEdges() in the runEdgeFirst pipeline for full-revolution cylinder faces"
 
-IMPORTANT: You MUST output the <!-- majlis-json --> block. This is how the framework reads your decision.`,
+CRITICAL: Your LAST line of output MUST be EXACTLY this format (on its own line, nothing after it):
+<!-- majlis-json {"goal_met": false, "hypothesis": "your single-sentence hypothesis here"} -->
+
+If the goal is met:
+<!-- majlis-json {"goal_met": true, "hypothesis": null} -->`,
   }, root);
 
   // Parse the planner's response
@@ -179,12 +185,31 @@ IMPORTANT: You MUST output the <!-- majlis-json --> block. This is how the frame
     return structured.hypothesis;
   }
 
-  // Fallback: try to extract hypothesis from the markdown
-  const match = result.output.match(/hypothesis["\s:]+([^"}\n]+)/i);
-  if (match) return match[1].trim();
+  // Fallback: try to extract hypothesis from a JSON-like structure in the raw text
+  // Only match inside {"hypothesis": "..."} patterns to avoid grabbing random text
+  const jsonMatch = result.output.match(/"hypothesis"\s*:\s*"([^"]+)"/);
+  if (jsonMatch && jsonMatch[1].length > 10) return jsonMatch[1].trim();
 
-  // Last resort: use the goal itself as the hypothesis
-  fmt.warn('Planner did not return a structured hypothesis. Using goal as fallback.');
+  // Second fallback: look for a majlis-json block that wasn't parsed
+  const blockMatch = result.output.match(/<!--\s*majlis-json\s*(\{[\s\S]*?\})\s*-->/);
+  if (blockMatch) {
+    try {
+      const parsed = JSON.parse(blockMatch[1]);
+      if (parsed.goal_met === true) return null;
+      if (parsed.hypothesis) return parsed.hypothesis;
+    } catch { /* ignore parse errors */ }
+  }
+
+  // Last resort: re-run planner with no tools, just ask for the hypothesis
+  fmt.warn('Planner did not return structured output. Retrying with focused prompt...');
+  const retry = await spawnSynthesiser({
+    taskPrompt: `Based on this analysis, output ONLY a single-line JSON block:\n\n${result.output.slice(-2000)}\n\n<!-- majlis-json {"goal_met": false, "hypothesis": "your hypothesis"} -->`,
+  }, root);
+
+  if (retry.structured?.hypothesis) return retry.structured.hypothesis;
+
+  // True last resort
+  fmt.warn('Could not extract hypothesis. Using goal as fallback.');
   return goal;
 }
 
@@ -224,8 +249,11 @@ function createNewExperiment(
     fmt.warn(`Could not create branch ${branch} — continuing without git branch.`);
   }
 
-  // Create DB entry
+  // Create DB entry — start at 'reframed' so it goes straight to building
+  // (classify/reframe are session-level, already done by the planner)
   const exp = createExperiment(db, finalSlug, branch, hypothesis, null, null);
+  updateExperimentStatus(db, exp.id, 'reframed');
+  exp.status = 'reframed';
 
   // Create experiment log from template
   const docsDir = path.join(root, 'docs', 'experiments');
