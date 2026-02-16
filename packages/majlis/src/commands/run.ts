@@ -16,7 +16,7 @@ import { isTerminal } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
 import { next } from './next.js';
 import { cycle } from './cycle.js';
-import { spawnSynthesiser } from '../agents/spawn.js';
+import { spawnSynthesiser, generateSlug } from '../agents/spawn.js';
 import type { MajlisConfig, Experiment } from '../types.js';
 import { loadConfig, readFileOrEmpty, truncateContext, CONTEXT_LIMITS } from '../config.js';
 import { isShutdownRequested } from '../shutdown.js';
@@ -94,7 +94,7 @@ export async function run(args: string[]): Promise<void> {
       fmt.info(`Next hypothesis: ${hypothesis}`);
 
       // Create the experiment programmatically
-      exp = createNewExperiment(db, root, hypothesis);
+      exp = await createNewExperiment(db, root, hypothesis);
       fmt.success(`Created experiment #${exp.id}: ${exp.slug}`);
     }
 
@@ -256,12 +256,12 @@ If the goal is met:
 /**
  * Create a new experiment programmatically (mirrors newExperiment command).
  */
-function createNewExperiment(
+async function createNewExperiment(
   db: ReturnType<typeof getDb>,
   root: string,
   hypothesis: string,
-): Experiment {
-  const slug = slugify(hypothesis);
+): Promise<Experiment> {
+  const slug = await generateSlug(hypothesis, root);
 
   // Dedup slug
   let finalSlug = slug;
@@ -315,11 +315,4 @@ function createNewExperiment(
   return exp;
 }
 
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 50);
-}
 

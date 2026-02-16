@@ -10,6 +10,7 @@ import {
   insertDeadEnd,
 } from '../db/queries.js';
 import { loadConfig, getFlagValue } from '../config.js';
+import { generateSlug } from '../agents/spawn.js';
 import * as fmt from '../output/format.js';
 
 export async function newExperiment(args: string[]): Promise<void> {
@@ -24,8 +25,8 @@ export async function newExperiment(args: string[]): Promise<void> {
   const db = getDb(root);
   const config = loadConfig(root);
 
-  // Generate slug from hypothesis
-  const slug = slugify(hypothesis);
+  // Use explicit --slug if provided, otherwise generate via Haiku
+  const slug = getFlagValue(args, '--slug') ?? await generateSlug(hypothesis, root);
 
   // Check for duplicates
   if (getExperimentBySlug(db, slug)) {
@@ -141,11 +142,4 @@ export async function revert(args: string[]): Promise<void> {
   fmt.info(`Experiment ${exp.slug} reverted to dead-end. Reason: ${reason}`);
 }
 
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 50);
-}
 

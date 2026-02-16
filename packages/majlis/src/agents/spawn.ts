@@ -300,6 +300,44 @@ async function runQuery(opts: {
 }
 
 /**
+ * Generate a concise 2-4 word slug from a hypothesis using Haiku.
+ * Falls back to naive truncation on failure.
+ */
+export async function generateSlug(hypothesis: string, projectRoot: string): Promise<string> {
+  const fallback = hypothesis
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 30)
+    .replace(/-$/, '');
+
+  try {
+    const { text } = await runQuery({
+      prompt:
+        `Generate a short, descriptive git branch slug (2-4 words, lowercase, hyphen-separated) for this experiment hypothesis:\n\n"${hypothesis.slice(0, 500)}"\n\n` +
+        `Output ONLY the slug, nothing else. Examples: uv-containment-filter, skip-degenerate-faces, fix-edge-sewing-order`,
+      model: 'haiku',
+      tools: [],
+      systemPrompt: 'Output only a short hyphenated slug. No explanation, no quotes, no punctuation except hyphens.',
+      cwd: projectRoot,
+      maxTurns: 1,
+      label: 'slug',
+    });
+
+    const slug = text
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, '')
+      .replace(/^-|-$/g, '')
+      .slice(0, 40);
+
+    return slug.length >= 3 ? slug : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * Format a brief detail string for a tool use event.
  */
 function formatToolDetail(toolName: string, input: Record<string, any>): string {
