@@ -137,6 +137,35 @@ const migrations: Migration[] = [
       CREATE INDEX idx_challenges_experiment ON challenges(experiment_id);
     `);
   },
+
+  // Migration 004: v3 → v4 — Reframes, findings tables; dead-end classification
+  (db) => {
+    db.exec(`
+      CREATE TABLE reframes (
+        id INTEGER PRIMARY KEY,
+        experiment_id INTEGER REFERENCES experiments(id),
+        decomposition TEXT NOT NULL,
+        divergences TEXT NOT NULL,
+        recommendation TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX idx_reframes_experiment ON reframes(experiment_id);
+
+      CREATE TABLE findings (
+        id INTEGER PRIMARY KEY,
+        experiment_id INTEGER REFERENCES experiments(id),
+        approach TEXT NOT NULL,
+        source TEXT NOT NULL,
+        relevance TEXT NOT NULL,
+        contradicts_current BOOLEAN NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX idx_findings_experiment ON findings(experiment_id);
+
+      ALTER TABLE dead_ends ADD COLUMN category TEXT DEFAULT 'structural'
+        CHECK(category IN ('structural', 'procedural'));
+    `);
+  },
 ];
 
 /**

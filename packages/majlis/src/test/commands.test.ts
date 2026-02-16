@@ -73,7 +73,7 @@ describe('majlis init', () => {
 
   it('creates agent definitions', () => {
     run('init');
-    const agents = ['builder', 'critic', 'adversary', 'verifier', 'reframer', 'compressor'];
+    const agents = ['builder', 'critic', 'adversary', 'verifier', 'reframer', 'compressor', 'scout', 'gatekeeper'];
     for (const agent of agents) {
       assert.ok(
         fs.existsSync(path.join(tmpDir, '.majlis', 'agents', `${agent}.md`)),

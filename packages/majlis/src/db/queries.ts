@@ -162,12 +162,13 @@ export function insertDeadEnd(
   whyFailed: string,
   structuralConstraint: string,
   subType: string | null,
+  category: 'structural' | 'procedural' = 'structural',
 ): DeadEnd {
   const stmt = db.prepare(`
-    INSERT INTO dead_ends (experiment_id, approach, why_failed, structural_constraint, sub_type)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO dead_ends (experiment_id, approach, why_failed, structural_constraint, sub_type, category)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
-  const result = stmt.run(experimentId, approach, whyFailed, structuralConstraint, subType);
+  const result = stmt.run(experimentId, approach, whyFailed, structuralConstraint, subType, category);
   return db.prepare('SELECT * FROM dead_ends WHERE id = ?').get(result.lastInsertRowid) as DeadEnd;
 }
 
@@ -393,4 +394,138 @@ export function getLastCompression(db: Database.Database): Compression | null {
   return db.prepare(`
     SELECT * FROM compressions ORDER BY created_at DESC LIMIT 1
   `).get() as Compression | null;
+}
+
+// ── Structural Dead Ends ────────────────────────────────────
+
+export function listStructuralDeadEnds(db: Database.Database): DeadEnd[] {
+  return db.prepare(`
+    SELECT * FROM dead_ends WHERE category = 'structural' ORDER BY created_at
+  `).all() as DeadEnd[];
+}
+
+export function listStructuralDeadEndsBySubType(db: Database.Database, subType: string): DeadEnd[] {
+  return db.prepare(`
+    SELECT * FROM dead_ends WHERE category = 'structural' AND sub_type = ? ORDER BY created_at
+  `).all(subType) as DeadEnd[];
+}
+
+// ── Reframes ────────────────────────────────────────────────
+
+export function insertReframe(
+  db: Database.Database,
+  experimentId: number,
+  decomposition: string,
+  divergences: string,
+  recommendation: string,
+): void {
+  db.prepare(`
+    INSERT INTO reframes (experiment_id, decomposition, divergences, recommendation)
+    VALUES (?, ?, ?, ?)
+  `).run(experimentId, decomposition, divergences, recommendation);
+}
+
+export function getReframesByExperiment(db: Database.Database, experimentId: number) {
+  return db.prepare('SELECT * FROM reframes WHERE experiment_id = ? ORDER BY created_at').all(experimentId);
+}
+
+// ── Findings ────────────────────────────────────────────────
+
+export function insertFinding(
+  db: Database.Database,
+  experimentId: number,
+  approach: string,
+  source: string,
+  relevance: string,
+  contradictsCurrent: boolean,
+): void {
+  db.prepare(`
+    INSERT INTO findings (experiment_id, approach, source, relevance, contradicts_current)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(experimentId, approach, source, relevance, contradictsCurrent ? 1 : 0);
+}
+
+export function getFindingsByExperiment(db: Database.Database, experimentId: number) {
+  return db.prepare('SELECT * FROM findings WHERE experiment_id = ? ORDER BY created_at').all(experimentId);
+}
+
+// ── Compressor Export ───────────────────────────────────────
+
+/**
+ * Export structured data for the compressor agent.
+ * Returns formatted markdown with all structured data from the DB.
+ */
+export function exportForCompressor(db: Database.Database, maxLength: number = 30000): string {
+  const experiments = listAllExperiments(db);
+  const sections: string[] = ['# Structured Data Export (from SQLite)\n'];
+
+  sections.push('## Experiments');
+  for (const exp of experiments) {
+    sections.push(`### EXP-${String(exp.id).padStart(3, '0')}: ${exp.slug}`);
+    sections.push(`- Status: ${exp.status} | Sub-type: ${exp.sub_type ?? '(none)'}`);
+    sections.push(`- Hypothesis: ${exp.hypothesis ?? '(none)'}`);
+
+    const decisions = listDecisionsByExperiment(db, exp.id);
+    if (decisions.length > 0) {
+      sections.push(`#### Decisions (${decisions.length})`);
+      for (const d of decisions) {
+        sections.push(`- [${d.evidence_level}] ${d.description} — ${d.justification} (${d.status})`);
+      }
+    }
+
+    const doubts = getDoubtsByExperiment(db, exp.id);
+    if (doubts.length > 0) {
+      sections.push(`#### Doubts (${doubts.length})`);
+      for (const d of doubts) {
+        sections.push(`- [${d.severity}] ${d.claim_doubted} (resolution: ${d.resolution ?? 'pending'})`);
+      }
+    }
+
+    const verifications = getVerificationsByExperiment(db, exp.id);
+    if (verifications.length > 0) {
+      sections.push(`#### Verifications (${verifications.length})`);
+      for (const v of verifications) {
+        sections.push(`- ${v.component}: ${v.grade}${v.notes ? ` — ${v.notes}` : ''}`);
+      }
+    }
+
+    const challenges = getChallengesByExperiment(db, exp.id);
+    if (challenges.length > 0) {
+      sections.push(`#### Challenges (${challenges.length})`);
+      for (const c of challenges) {
+        sections.push(`- ${c.description}`);
+      }
+    }
+
+    sections.push('');
+  }
+
+  const deadEnds = listAllDeadEnds(db);
+  if (deadEnds.length > 0) {
+    sections.push('## Dead Ends');
+    for (const de of deadEnds) {
+      sections.push(`- [${de.category ?? 'structural'}] ${de.approach}: ${de.why_failed} → ${de.structural_constraint}`);
+    }
+    sections.push('');
+  }
+
+  const unresolvedDoubts = db.prepare(`
+    SELECT d.*, e.slug as experiment_slug
+    FROM doubts d JOIN experiments e ON d.experiment_id = e.id
+    WHERE d.resolution IS NULL
+    ORDER BY d.severity DESC, d.created_at
+  `).all() as Array<Doubt & { experiment_slug: string }>;
+
+  if (unresolvedDoubts.length > 0) {
+    sections.push('## Unresolved Doubts');
+    for (const d of unresolvedDoubts) {
+      sections.push(`- [${d.severity}] ${d.claim_doubted} (exp: ${d.experiment_slug})`);
+    }
+  }
+
+  const full = sections.join('\n');
+  if (full.length > maxLength) {
+    return full.slice(0, maxLength) + `\n\n[TRUNCATED — full export was ${full.length} chars]`;
+  }
+  return full;
 }

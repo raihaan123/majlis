@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentDefinition, AgentResult, AgentContext, StructuredOutput } from './types.js';
-import { extractStructuredData } from './parse.js';
+import { extractStructuredData, validateForRole } from './parse.js';
 import { findProjectRoot } from '../db/connection.js';
 
 /**
@@ -49,6 +49,7 @@ const ROLE_MAX_TURNS: Record<string, number> = {
   compressor: 30,
   reframer: 20,
   scout: 20,
+  gatekeeper: 10,
 };
 
 function extractYamlField(yaml: string, field: string): string | null {
@@ -95,6 +96,14 @@ export async function spawnAgent(
 
   // Extract structured data via 3-tier parsing
   const structured = await extractStructuredData(role, markdown);
+
+  // Validate role-specific output
+  if (structured) {
+    const { valid, missing } = validateForRole(role, structured);
+    if (!valid) {
+      console.warn(`[${role}] Output missing expected fields: ${missing.join(', ')}`);
+    }
+  }
 
   return { output: markdown, structured, truncated };
 }

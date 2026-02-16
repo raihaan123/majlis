@@ -116,6 +116,7 @@ export async function resolve(
         whyFailed,
         `Approach rejected: ${whyFailed}`,
         exp.sub_type,
+        'structural',
       );
 
       updateExperimentStatus(db, exp.id, 'dead_end');

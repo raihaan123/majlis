@@ -64,6 +64,7 @@ export interface DeadEnd {
   why_failed: string;
   structural_constraint: string;
   sub_type: string | null;
+  category: 'structural' | 'procedural';
   created_at: string;
 }
 

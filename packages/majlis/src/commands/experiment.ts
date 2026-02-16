@@ -107,6 +107,7 @@ export async function revert(args: string[]): Promise<void> {
   // Record dead-end
   const reasonIdx = args.indexOf('--reason');
   const reason = reasonIdx >= 0 ? args[reasonIdx + 1] : 'Manually reverted';
+  const category = args.includes('--structural') ? 'structural' as const : 'procedural' as const;
 
   insertDeadEnd(
     db,
@@ -115,6 +116,7 @@ export async function revert(args: string[]): Promise<void> {
     reason,
     `Reverted: ${reason}`,
     exp.sub_type,
+    category,
   );
 
   // Update status

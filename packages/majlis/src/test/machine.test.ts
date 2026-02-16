@@ -21,14 +21,14 @@ function makeExp(overrides: Partial<Experiment> = {}): Experiment {
 }
 
 describe('ExperimentStatus enum', () => {
-  it('has 13 states', () => {
+  it('has 14 states', () => {
     const values = Object.values(ExperimentStatus);
-    assert.equal(values.length, 13);
+    assert.equal(values.length, 14);
   });
 
-  it('has exactly the states from PRD v2 §4.1', () => {
+  it('has exactly the states from PRD v2 §4.1 + GATED', () => {
     const expected = [
-      'classified', 'reframed', 'building', 'built', 'challenged',
+      'classified', 'reframed', 'gated', 'building', 'built', 'challenged',
       'doubted', 'scouted', 'verifying', 'verified', 'resolved',
       'compressed', 'merged', 'dead_end',
     ];
@@ -50,9 +50,21 @@ describe('TRANSITIONS map', () => {
     assert.deepEqual(TRANSITIONS[ExperimentStatus.DEAD_END], []);
   });
 
-  it('classified can go to reframed or building', () => {
+  it('classified can go to reframed or gated', () => {
     assert.deepEqual(TRANSITIONS[ExperimentStatus.CLASSIFIED], [
-      ExperimentStatus.REFRAMED, ExperimentStatus.BUILDING,
+      ExperimentStatus.REFRAMED, ExperimentStatus.GATED,
+    ]);
+  });
+
+  it('reframed goes to gated', () => {
+    assert.deepEqual(TRANSITIONS[ExperimentStatus.REFRAMED], [
+      ExperimentStatus.GATED,
+    ]);
+  });
+
+  it('gated can go to building or self-loop', () => {
+    assert.deepEqual(TRANSITIONS[ExperimentStatus.GATED], [
+      ExperimentStatus.BUILDING, ExperimentStatus.GATED,
     ]);
   });
 
@@ -62,9 +74,15 @@ describe('TRANSITIONS map', () => {
     ]);
   });
 
-  it('resolved can go to compressed or building (cycle back)', () => {
+  it('resolved can go to compressed or building (cycle back skips gate)', () => {
     assert.deepEqual(TRANSITIONS[ExperimentStatus.RESOLVED], [
       ExperimentStatus.COMPRESSED, ExperimentStatus.BUILDING,
+    ]);
+  });
+
+  it('compressed can go to merged or building (cycle back skips gate)', () => {
+    assert.deepEqual(TRANSITIONS[ExperimentStatus.COMPRESSED], [
+      ExperimentStatus.MERGED, ExperimentStatus.BUILDING,
     ]);
   });
 });
@@ -72,7 +90,11 @@ describe('TRANSITIONS map', () => {
 describe('transition()', () => {
   it('returns the target for valid transitions', () => {
     assert.equal(
-      transition(ExperimentStatus.CLASSIFIED, ExperimentStatus.BUILDING),
+      transition(ExperimentStatus.CLASSIFIED, ExperimentStatus.GATED),
+      ExperimentStatus.GATED,
+    );
+    assert.equal(
+      transition(ExperimentStatus.GATED, ExperimentStatus.BUILDING),
       ExperimentStatus.BUILDING,
     );
     assert.equal(
@@ -98,6 +120,11 @@ describe('transition()', () => {
       () => transition(ExperimentStatus.BUILT, ExperimentStatus.MERGED),
       /Invalid transition/,
     );
+    // classified → building is no longer valid (must go through gate)
+    assert.throws(
+      () => transition(ExperimentStatus.CLASSIFIED, ExperimentStatus.BUILDING),
+      /Invalid transition/,
+    );
   });
 
   it('throws on self-transitions that are not in the map', () => {
@@ -110,11 +137,16 @@ describe('transition()', () => {
   it('allows building → building self-loop for truncation retry', () => {
     assert.equal(transition(ExperimentStatus.BUILDING, ExperimentStatus.BUILDING), ExperimentStatus.BUILDING);
   });
+
+  it('allows gated → gated self-loop for rejected hypotheses', () => {
+    assert.equal(transition(ExperimentStatus.GATED, ExperimentStatus.GATED), ExperimentStatus.GATED);
+  });
 });
 
 describe('validNext()', () => {
   it('returns valid transitions for each status', () => {
-    assert.deepEqual(validNext(ExperimentStatus.REFRAMED), [ExperimentStatus.BUILDING]);
+    assert.deepEqual(validNext(ExperimentStatus.REFRAMED), [ExperimentStatus.GATED]);
+    assert.deepEqual(validNext(ExperimentStatus.GATED), [ExperimentStatus.BUILDING, ExperimentStatus.GATED]);
     assert.deepEqual(validNext(ExperimentStatus.SCOUTED), [ExperimentStatus.VERIFYING]);
     assert.deepEqual(validNext(ExperimentStatus.MERGED), []);
   });
@@ -139,6 +171,10 @@ describe('isTerminal()', () => {
 
   it('verified is not terminal', () => {
     assert.ok(!isTerminal(ExperimentStatus.VERIFIED));
+  });
+
+  it('gated is not terminal', () => {
+    assert.ok(!isTerminal(ExperimentStatus.GATED));
   });
 });
 
@@ -178,9 +214,23 @@ describe('determineNextStep()', () => {
     assert.equal(result, ExperimentStatus.VERIFYING);
   });
 
-  it('classified → building (skip reframe, already session-level)', () => {
+  it('classified → gated (must gate before building)', () => {
     const exp = makeExp({ status: 'classified' });
     const valid = TRANSITIONS[ExperimentStatus.CLASSIFIED];
+    const result = determineNextStep(exp, valid, false, false);
+    assert.equal(result, ExperimentStatus.GATED);
+  });
+
+  it('reframed → gated', () => {
+    const exp = makeExp({ status: 'reframed' });
+    const valid = TRANSITIONS[ExperimentStatus.REFRAMED];
+    const result = determineNextStep(exp, valid, false, false);
+    assert.equal(result, ExperimentStatus.GATED);
+  });
+
+  it('gated → building', () => {
+    const exp = makeExp({ status: 'gated' });
+    const valid = TRANSITIONS[ExperimentStatus.GATED];
     const result = determineNextStep(exp, valid, false, false);
     assert.equal(result, ExperimentStatus.BUILDING);
   });

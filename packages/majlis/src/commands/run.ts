@@ -6,6 +6,7 @@ import {
   getLatestExperiment,
   listActiveExperiments,
   listAllDeadEnds,
+  insertDeadEnd,
   getSessionsSinceCompression,
   createExperiment,
   getExperimentBySlug,
@@ -99,6 +100,8 @@ export async function run(args: string[]): Promise<void> {
       const message = err instanceof Error ? err.message : String(err);
       fmt.warn(`Step failed for ${exp.slug}: ${message}`);
       try {
+        insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug, message,
+          `Process failure: ${message}`, exp.sub_type, 'procedural');
         updateExperimentStatus(db, exp.id, 'dead_end');
       } catch { /* if even this fails, MAX_STEPS will stop the loop */ }
     }
@@ -164,7 +167,10 @@ ${fragility || '(none)'}
 ${deadEndsDoc || '(none)'}
 
 ## Dead Ends (from DB — ${deadEnds.length} total)
-${deadEnds.map(d => `- ${d.approach}: ${d.why_failed} [constraint: ${d.structural_constraint}]`).join('\n') || '(none)'}
+${deadEnds.map(d => `- [${d.category ?? 'structural'}] ${d.approach}: ${d.why_failed} [constraint: ${d.structural_constraint}]`).join('\n') || '(none)'}
+
+Note: [structural] dead ends are HARD CONSTRAINTS — your hypothesis MUST NOT repeat these approaches.
+[procedural] dead ends are process failures — the approach may still be valid if executed differently.
 
 ## Your Task
 1. Assess: based on the metrics and synthesis, has the goal been met? Be specific.

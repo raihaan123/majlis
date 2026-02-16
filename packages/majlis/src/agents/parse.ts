@@ -1,5 +1,5 @@
 import type { StructuredOutput } from './types.js';
-import { EXTRACTION_SCHEMA } from './types.js';
+import { EXTRACTION_SCHEMA, getExtractionSchema, ROLE_REQUIRED_FIELDS } from './types.js';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 /**
@@ -128,7 +128,7 @@ export function extractViaPatterns(role: string, markdown: string): StructuredOu
   while ((match = doubtPattern.exec(markdown)) !== null) {
     doubts.push({
       claim_doubted: match[1].trim(),
-      evidence_level_of_claim: 'judgment',
+      evidence_level_of_claim: 'unknown',  // Don't fabricate — mark as unknown for review
       evidence_for_doubt: 'Extracted via regex — review original document',
       severity: match[2].toLowerCase().trim(),
     });
@@ -145,7 +145,8 @@ async function extractViaHaiku(role: string, markdown: string): Promise<Structur
   try {
     const truncated = markdown.length > 8000 ? markdown.slice(0, 8000) + '\n[truncated]' : markdown;
 
-    const prompt = `Extract all decisions, evidence levels, grades, doubts, and guidance from this ${role} document as JSON. Follow this schema exactly: ${EXTRACTION_SCHEMA}\n\nDocument:\n${truncated}`;
+    const schema = getExtractionSchema(role);
+    const prompt = `Extract structured data from this ${role} document as JSON. Follow this schema exactly: ${schema}\n\nDocument:\n${truncated}`;
 
     const conversation = query({
       prompt,
@@ -183,6 +184,31 @@ function hasData(output: StructuredOutput): boolean {
     (output.decisions && output.decisions.length > 0) ||
     (output.grades && output.grades.length > 0) ||
     (output.doubts && output.doubts.length > 0) ||
-    output.guidance
+    (output.challenges && output.challenges.length > 0) ||
+    (output.findings && output.findings.length > 0) ||
+    output.guidance ||
+    output.reframe ||
+    output.compression_report ||
+    output.gate_decision
   );
+}
+
+/**
+ * Validate that structured output contains the expected fields for the role.
+ */
+export function validateForRole(
+  role: string,
+  output: StructuredOutput,
+): { valid: boolean; missing: string[] } {
+  const required = ROLE_REQUIRED_FIELDS[role];
+  if (!required) return { valid: true, missing: [] };
+
+  const missing = required.filter(field => {
+    const value = (output as any)[field];
+    if (value === undefined || value === null) return true;
+    if (Array.isArray(value) && value.length === 0) return true;
+    return false;
+  });
+
+  return { valid: missing.length === 0, missing };
 }

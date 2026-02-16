@@ -45,8 +45,15 @@ export function determineNextStep(
 
   const status = exp.status as ExperimentStatus;
 
-  // classified → skip straight to building (reframing is session-level, already done)
-  if (status === ExperimentStatus.CLASSIFIED) {
+  // classified or reframed → must gate before building
+  if (status === ExperimentStatus.CLASSIFIED || status === ExperimentStatus.REFRAMED) {
+    return valid.includes(ExperimentStatus.GATED)
+      ? ExperimentStatus.GATED
+      : valid[0];
+  }
+
+  // gated → proceed to building
+  if (status === ExperimentStatus.GATED) {
     return valid.includes(ExperimentStatus.BUILDING)
       ? ExperimentStatus.BUILDING
       : valid[0];

@@ -184,11 +184,14 @@ async function executeStep(
       updateExperimentStatus(getDb(root), exp.id, 'compressed');
       fmt.info(`Experiment ${exp.slug} compressed.`);
       break;
+    case ExperimentStatus.GATED:
+      await cycle('gate', expArgs);
+      break;
     case ExperimentStatus.REFRAMED:
       // Reframing is session-level (already done before experiment creation).
-      // Just advance the status so the next iteration picks up building.
+      // Just advance the status so the next iteration picks up gating.
       updateExperimentStatus(getDb(root), exp.id, 'reframed');
-      fmt.info(`Reframe acknowledged for ${exp.slug}. Proceeding to build.`);
+      fmt.info(`Reframe acknowledged for ${exp.slug}. Proceeding to gate.`);
       break;
     default:
       fmt.warn(`Don't know how to execute step: ${step}`);
