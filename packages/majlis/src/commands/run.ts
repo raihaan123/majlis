@@ -164,7 +164,8 @@ ${deadEnds.map(d => `- ${d.approach}: ${d.why_failed} [constraint: ${d.structura
 3. If NO — propose the SINGLE most promising next experiment hypothesis.
    - It must NOT repeat a dead-ended approach (check the dead-end registry!)
    - It should attack the weakest point revealed by synthesis/fragility
-   - It must be specific and actionable — name the exact code/function/mechanism to change
+   - It must be specific and actionable — name the function or mechanism to change
+   - Do NOT reference specific line numbers — they shift between experiments
    - The hypothesis should be a single sentence describing what to do, e.g.:
      "Activate addSeamEdges() in the runEdgeFirst pipeline for full-revolution cylinder faces"
 

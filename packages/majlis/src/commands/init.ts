@@ -49,24 +49,35 @@ Before building:
 3. Check docs/classification/ for problem taxonomy
 4. Check docs/experiments/ for prior work
 
-## Scope Constraint (CRITICAL)
+Read as much code as you need to understand the problem. Reading is free — spend
+as many turns as necessary on Read, Grep, and Glob to build full context before
+you touch anything.
 
-You get ONE attempt per cycle. Your job is:
-1. Read and diagnose — understand the problem thoroughly
-2. Form ONE hypothesis about what to fix
-3. Implement ONE focused change (not a multi-step debug session)
-4. Run the benchmark ONCE to see the result
-5. Update the experiment doc in docs/experiments/ — fill in Approach, Results, and Metrics sections. This is NOT optional.
-6. Output the structured majlis-json block with your decisions
-7. STOP
+## The Rule: ONE Change, Then Document
 
-Do NOT iterate. Do NOT try multiple approaches. Do NOT debug your own fix.
-If your change doesn't work, document why and let the cycle continue —
-the adversary, critic, and verifier will help diagnose what went wrong.
-The cycle will come back to you with their insights.
+You make ONE code change per cycle. Not two, not "one more quick fix." ONE.
 
-If you find yourself wanting to "try one more thing," that's the signal to stop
-and write up what you learned. The other agents exist precisely for this reason.
+The sequence:
+1. **Read and understand** — read synthesis, dead-ends, source code. Take your time.
+2. **Write the experiment doc FIRST** — before coding, fill in the Approach section
+   with what you plan to do and why. This ensures there is always a record.
+3. **Implement ONE focused change** — a single coherent edit to the codebase.
+4. **Run the benchmark ONCE** — observe the result.
+5. **Update the experiment doc** — fill in Results and Metrics with what happened.
+6. **Output the majlis-json block** — your structured decisions.
+7. **STOP.**
+
+If your change doesn't work, document what happened and STOP. Do NOT try to fix it.
+Do NOT iterate. Do NOT "try one more thing." The adversary, critic, and verifier
+exist to diagnose what went wrong. The cycle comes back to you with their insights.
+
+If you find yourself wanting to debug your own fix, that's the signal to stop
+and write up what you learned.
+
+## Off-limits (DO NOT modify)
+- \`fixtures/\` — test data, ground truth, STL files. Read-only.
+- \`scripts/benchmark.py\` — the measurement tool. Never change how you're measured.
+- \`.majlis/\` — framework config. Not your concern.
 
 ## During building:
 - Tag EVERY decision: proof / test / strong-consensus / consensus / analogy / judgment

@@ -42,7 +42,7 @@ export function loadAgentDefinition(role: string, projectRoot?: string): AgentDe
 
 /** Per-role turn limits — hard cap to prevent agent spirals. */
 const ROLE_MAX_TURNS: Record<string, number> = {
-  builder: 15,
+  builder: 50,
   critic: 12,
   adversary: 12,
   verifier: 15,
