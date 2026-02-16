@@ -43,12 +43,12 @@ export function loadAgentDefinition(role: string, projectRoot?: string): AgentDe
 /** Per-role turn limits — hard cap to prevent agent spirals. */
 const ROLE_MAX_TURNS: Record<string, number> = {
   builder: 50,
-  critic: 12,
-  adversary: 12,
-  verifier: 15,
-  compressor: 15,
-  reframer: 12,
-  scout: 12,
+  critic: 30,
+  adversary: 30,
+  verifier: 50,
+  compressor: 30,
+  reframer: 20,
+  scout: 20,
 };
 
 function extractYamlField(yaml: string, field: string): string | null {
@@ -73,7 +73,7 @@ export async function spawnAgent(
   const prompt = `Here is your context:\n\n\`\`\`json\n${contextJson}\n\`\`\`\n\n${taskPrompt}`;
 
   const turns = ROLE_MAX_TURNS[role] ?? 15;
-  console.log(`[majlis] Spawning ${role} agent (model: ${agentDef.model}, maxTurns: ${turns})...`);
+  console.log(`[${role}] Spawning (model: ${agentDef.model}, maxTurns: ${turns})...`);
 
   const { text: markdown, costUsd } = await runQuery({
     prompt,
@@ -82,14 +82,15 @@ export async function spawnAgent(
     systemPrompt: agentDef.systemPrompt,
     cwd: root,
     maxTurns: turns,
+    label: role,
   });
 
-  console.log(`[majlis] ${role} agent complete (cost: $${costUsd.toFixed(4)})`);
+  console.log(`[${role}] Complete (cost: $${costUsd.toFixed(4)})`);
 
   // Write artifact to docs/ directory
   const artifactPath = writeArtifact(role, context, markdown, root);
   if (artifactPath) {
-    console.log(`[majlis] ${role} artifact written to ${artifactPath}`);
+    console.log(`[${role}] Artifact written to ${artifactPath}`);
   }
 
   // Extract structured data via 3-tier parsing
@@ -119,7 +120,7 @@ export async function spawnSynthesiser(
     'The framework parses this programmatically — if you omit it, the pipeline breaks. ' +
     'Format: <!-- majlis-json {"guidance": "your guidance here"} -->';
 
-  console.log(`[majlis] Spawning synthesiser micro-agent...`);
+  console.log(`[synthesiser] Spawning (maxTurns: 5)...`);
 
   const { text: markdown, costUsd } = await runQuery({
     prompt,
@@ -128,13 +129,14 @@ export async function spawnSynthesiser(
     systemPrompt,
     cwd: root,
     maxTurns: 5,
+    label: 'synthesiser',
   });
 
-  console.log(`[majlis] Synthesiser complete (cost: $${costUsd.toFixed(4)})`);
+  console.log(`[synthesiser] Complete (cost: $${costUsd.toFixed(4)})`);
 
-  const structured = await extractStructuredData('synthesiser', markdown);
-
-  return { output: markdown, structured };
+  // The synthesiser's output IS the guidance — skip 3-tier extraction
+  // (it never outputs <!-- majlis-json --> reliably, wasting a Haiku call).
+  return { output: markdown, structured: { guidance: markdown } };
 }
 
 const DIM = '\x1b[2m';
@@ -152,7 +154,9 @@ async function runQuery(opts: {
   systemPrompt: string;
   cwd: string;
   maxTurns?: number;
+  label?: string;
 }): Promise<{ text: string; costUsd: number }> {
+  const tag = opts.label ?? 'majlis';
   const conversation = query({
     prompt: opts.prompt,
     options: {
@@ -188,20 +192,20 @@ async function runQuery(opts: {
           const toolName = (block as any).name ?? 'tool';
           const input = (block as any).input ?? {};
           const detail = formatToolDetail(toolName, input);
-          process.stderr.write(`${DIM}[majlis]   ${CYAN}${toolName}${RESET}${DIM}${detail}${RESET}\n`);
+          process.stderr.write(`${DIM}[${tag}]   ${CYAN}${toolName}${RESET}${DIM}${detail}${RESET}\n`);
         }
       }
       if (hasText) {
         // Show a brief preview of the text output
         const preview = textParts[textParts.length - 1].slice(0, 120).replace(/\n/g, ' ').trim();
         if (preview) {
-          process.stderr.write(`${DIM}[majlis]   writing: ${preview}${preview.length >= 120 ? '...' : ''}${RESET}\n`);
+          process.stderr.write(`${DIM}[${tag}]   writing: ${preview}${preview.length >= 120 ? '...' : ''}${RESET}\n`);
         }
       }
     } else if (message.type === 'tool_progress') {
       const elapsed = Math.round(message.elapsed_time_seconds);
       if (elapsed > 0 && elapsed % 5 === 0) {
-        process.stderr.write(`${DIM}[majlis]   ${message.tool_name} running (${elapsed}s)...${RESET}\n`);
+        process.stderr.write(`${DIM}[${tag}]   ${message.tool_name} running (${elapsed}s)...${RESET}\n`);
       }
     } else if (message.type === 'result') {
       if (message.subtype === 'success') {
@@ -210,7 +214,7 @@ async function runQuery(opts: {
         // Agent hit turn limit — return partial output instead of throwing.
         // The cycle can still use whatever the agent produced.
         costUsd = 'total_cost_usd' in message ? (message as any).total_cost_usd : 0;
-        console.warn(`[majlis] Agent hit max turns (${turnCount}). Returning partial output.`);
+        console.warn(`[${tag}] Hit max turns (${turnCount}). Returning partial output.`);
       } else {
         const errors = 'errors' in message ? (message.errors?.join('; ') ?? 'Unknown error') : 'Unknown error';
         throw new Error(`Agent query failed (${message.subtype}): ${errors}`);
@@ -282,7 +286,7 @@ function writeArtifact(
   // For other roles, create a numbered file
   const expSlug = context.experiment?.slug ?? 'general';
   const existing = fs.readdirSync(fullDir).filter(f => f.endsWith('.md') && !f.startsWith('_'));
-  const nextNum = String(existing.length + 1).padStart(3, '0');
+  const nextNum = String(context.experiment?.id ?? existing.length + 1).padStart(3, '0');
 
   const filename = role === 'builder'
     ? `${nextNum}-${expSlug}.md`

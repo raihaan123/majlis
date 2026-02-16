@@ -11,6 +11,7 @@ import {
   storeBuilderGuidance,
   incrementSubTypeFailure,
   insertDeadEnd,
+  insertVerification,
 } from './db/queries.js';
 import { spawnSynthesiser } from './agents/spawn.js';
 import { execSync } from 'node:child_process';
@@ -37,10 +38,13 @@ export async function resolve(
   exp: Experiment,
   projectRoot: string,
 ): Promise<void> {
-  const grades = getVerificationsByExperiment(db, exp.id);
+  let grades = getVerificationsByExperiment(db, exp.id);
 
   if (grades.length === 0) {
-    throw new Error(`No verifications found for experiment ${exp.slug}. Run verify first.`);
+    fmt.warn(`No verification records for ${exp.slug}. Defaulting to weak.`);
+    insertVerification(db, exp.id, 'auto-default', 'weak', null, null,
+      'No structured verification output. Auto-defaulted to weak.');
+    grades = getVerificationsByExperiment(db, exp.id);
   }
 
   const overallGrade = worstGrade(grades);

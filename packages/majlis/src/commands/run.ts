@@ -93,7 +93,15 @@ export async function run(args: string[]): Promise<void> {
 
     // Execute next step
     fmt.info(`[Step ${stepCount}] ${exp.slug}: ${exp.status}`);
-    await next([exp.slug], false);
+    try {
+      await next([exp.slug], false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      fmt.warn(`Step failed for ${exp.slug}: ${message}`);
+      try {
+        updateExperimentStatus(db, exp.id, 'dead_end');
+      } catch { /* if even this fails, MAX_STEPS will stop the loop */ }
+    }
   }
 
   if (stepCount >= MAX_STEPS) {
