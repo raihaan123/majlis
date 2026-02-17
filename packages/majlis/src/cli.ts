@@ -41,6 +41,11 @@ async function main(): Promise<void> {
         await init(rest);
         break;
       }
+      case 'upgrade': {
+        const { upgrade } = await import('./commands/upgrade.js');
+        await upgrade(rest);
+        break;
+      }
       case 'status': {
         const { status } = await import('./commands/status.js');
         await status(isJson);
@@ -156,6 +161,7 @@ Usage: majlis <command> [options]
 
 Lifecycle:
   init                       Initialize Majlis in current project
+  upgrade                    Sync agents, commands, hooks from CLI version
   status [--json]            Show experiment states and cycle position
 
 Experiments:

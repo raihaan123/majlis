@@ -35,7 +35,7 @@ const DEFAULT_CONFIG = {
   },
 };
 
-const AGENT_DEFINITIONS: Record<string, string> = {
+export const AGENT_DEFINITIONS: Record<string, string> = {
   builder: `---
 name: builder
 model: opus
@@ -478,7 +478,7 @@ Produce a diagnostic report as markdown. At the end, include:
 - Trust the database export over docs/ files when they conflict.`,
 };
 
-const SLASH_COMMANDS: Record<string, { description: string; body: string }> = {
+export const SLASH_COMMANDS: Record<string, { description: string; body: string }> = {
   classify: {
     description: 'Classify a problem domain into canonical sub-types before building',
     body: `Run \`majlis classify "$ARGUMENTS"\` and follow its output.
@@ -547,7 +547,7 @@ Do NOT modify project code — analysis only.`,
   },
 };
 
-const HOOKS_CONFIG = {
+export const HOOKS_CONFIG = {
   hooks: {
     SessionStart: [
       {
@@ -585,7 +585,7 @@ const HOOKS_CONFIG = {
   },
 };
 
-const CLAUDE_MD_SECTION = `
+export const CLAUDE_MD_SECTION = `
 ## Majlis Protocol
 
 This project uses the Majlis Framework for structured multi-agent problem solving.
