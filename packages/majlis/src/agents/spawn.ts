@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import type { HookCallback, HookCallbackMatcher, HookEvent, HookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentDefinition, AgentResult, AgentContext, StructuredOutput } from './types.js';
 import { extractStructuredData, validateForRole } from './parse.js';
 import { findProjectRoot } from '../db/connection.js';
@@ -52,6 +53,120 @@ const ROLE_MAX_TURNS: Record<string, number> = {
   gatekeeper: 10,
 };
 
+/** Tool-use intervals at which to inject checkpoint grounding reminders. */
+const CHECKPOINT_INTERVAL: Record<string, number> = {
+  builder: 15,
+  verifier: 12,
+  critic: 15,
+  adversary: 15,
+  compressor: 15,
+};
+
+/**
+ * Build role-specific checkpoint grounding message.
+ * Injected as additionalContext via PostToolUse hooks.
+ */
+function buildCheckpointMessage(role: string, toolUseCount: number, maxTurns: number): string {
+  const approxTurn = Math.round(toolUseCount / 2);
+  const header = `[MAJLIS CHECKPOINT — ~${approxTurn} of ${maxTurns} turns used]`;
+
+  switch (role) {
+    case 'builder':
+      return `${header}\nReminder: ONE code change per cycle.\n` +
+        `- Have you run the benchmark? YES → document results + output JSON + STOP.\n` +
+        `- If NO → run it now, then wrap up.\n` +
+        `Do NOT start a second change or investigate unrelated failures.`;
+    case 'verifier':
+      return `${header}\nAT MOST 3 diagnostic scripts total.\n` +
+        `- If ≥3 scripts run → produce grades + output JSON now.\n` +
+        `- Trust framework metrics. Do not re-derive from raw data.`;
+    case 'critic':
+      return `${header}\nFocus on the SINGLE weakest assumption.\n` +
+        `- Have you identified the core doubt? YES → write it up + output JSON.\n` +
+        `- Do not enumerate every possible concern — pick the most dangerous one.`;
+    case 'adversary':
+      return `${header}\nDesign ONE targeted challenge, not a test suite.\n` +
+        `- Have you defined the challenge? YES → write it up + output JSON.\n` +
+        `- Focus on what would DISPROVE the hypothesis, not general testing.`;
+    case 'compressor':
+      return `${header}\nYou may ONLY write to docs/synthesis/.\n` +
+        `- Have you updated current.md, fragility.md, dead-ends.md?\n` +
+        `- If yes → output compression report JSON.\n` +
+        `- Do NOT write to MEMORY.md or files outside docs/synthesis/.`;
+    default:
+      return `${header}\nCheck: is your core task done? If yes, wrap up and output JSON.`;
+  }
+}
+
+/**
+ * Build PreToolUse guard hooks for structural enforcement.
+ * Returns undefined if the role has no guards.
+ */
+function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined {
+  if (role === 'compressor') {
+    const guardHook: HookCallback = async (input) => {
+      const toolInput = (input as any).tool_input ?? {};
+      const filePath: string = toolInput.file_path ?? '';
+      if (filePath && !filePath.includes('/docs/synthesis/')) {
+        return {
+          decision: 'block' as const,
+          reason: `Compressor may only write to docs/synthesis/. Blocked: ${filePath}`,
+        };
+      }
+      return {};
+    };
+
+    return [
+      { matcher: 'Write', hooks: [guardHook] },
+      { matcher: 'Edit', hooks: [guardHook] },
+    ];
+  }
+  return undefined;
+}
+
+/**
+ * Build agent hooks (PostToolUse checkpoints + PreToolUse guards).
+ * Returns undefined if the role has no hooks configured.
+ */
+function buildAgentHooks(
+  role: string,
+  maxTurns: number,
+): Partial<Record<HookEvent, HookCallbackMatcher[]>> | undefined {
+  const result: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {};
+  let hasHooks = false;
+
+  // PostToolUse: periodic checkpoint grounding reminders
+  const interval = CHECKPOINT_INTERVAL[role];
+  if (interval) {
+    let toolUseCount = 0;
+    const checkpointHook: HookCallback = async () => {
+      toolUseCount++;
+      if (toolUseCount % interval === 0) {
+        const msg = buildCheckpointMessage(role, toolUseCount, maxTurns);
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PostToolUse' as const,
+            additionalContext: msg,
+          },
+        };
+      }
+      return {};
+    };
+
+    result.PostToolUse = [{ hooks: [checkpointHook] }];
+    hasHooks = true;
+  }
+
+  // PreToolUse: structural guards (e.g. compressor write scope)
+  const guards = buildPreToolUseGuards(role);
+  if (guards) {
+    result.PreToolUse = guards;
+    hasHooks = true;
+  }
+
+  return hasHooks ? result : undefined;
+}
+
 function extractYamlField(yaml: string, field: string): string | null {
   const match = yaml.match(new RegExp(`^${field}:\\s*(.+)$`, 'm'));
   return match ? match[1].trim() : null;
@@ -84,6 +199,7 @@ export async function spawnAgent(
     cwd: root,
     maxTurns: turns,
     label: role,
+    role,
   });
 
   console.log(`[${role}] Complete (cost: $${costUsd.toFixed(4)}${truncated ? ', TRUNCATED' : ''})`);
@@ -139,6 +255,7 @@ export async function spawnSynthesiser(
     cwd: root,
     maxTurns: 5,
     label: 'synthesiser',
+    role: 'synthesiser',
   });
 
   console.log(`[synthesiser] Complete (cost: $${costUsd.toFixed(4)})`);
@@ -207,6 +324,7 @@ Your job: Write a CLEAN experiment doc to ${expDocPath} using the Write tool.
     cwd: root,
     maxTurns: 5,
     label: 'recovery',
+    role: 'recovery',
   });
 
   console.log(`[recovery] Cleanup complete for ${expSlug}.`);
@@ -228,9 +346,11 @@ async function runQuery(opts: {
   cwd: string;
   maxTurns?: number;
   label?: string;
+  role?: string;
 }): Promise<{ text: string; costUsd: number; truncated: boolean }> {
   let truncated = false;
   const tag = opts.label ?? 'majlis';
+  const hooks = opts.role ? buildAgentHooks(opts.role, opts.maxTurns ?? 15) : undefined;
   const conversation = query({
     prompt: opts.prompt,
     options: {
@@ -247,6 +367,7 @@ async function runQuery(opts: {
       maxTurns: opts.maxTurns ?? 15,
       persistSession: false,
       settingSources: ['project'],
+      hooks,
     },
   });
 
@@ -322,6 +443,7 @@ export async function generateSlug(hypothesis: string, projectRoot: string): Pro
       cwd: projectRoot,
       maxTurns: 1,
       label: 'slug',
+      role: 'slug',
     });
 
     const slug = text

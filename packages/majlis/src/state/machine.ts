@@ -80,6 +80,13 @@ export function determineNextStep(
     }
   }
 
+  // compressed → advance to merged (final step before terminal)
+  if (status === ExperimentStatus.COMPRESSED) {
+    return valid.includes(ExperimentStatus.MERGED)
+      ? ExperimentStatus.MERGED
+      : valid[0];
+  }
+
   // Default: first valid transition
   return valid[0];
 }

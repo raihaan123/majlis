@@ -203,6 +203,14 @@ async function executeStep(
       updateExperimentStatus(getDb(root), exp.id, 'reframed');
       fmt.info(`Reframe acknowledged for ${exp.slug}. Proceeding to gate.`);
       break;
+    case ExperimentStatus.MERGED:
+      // Terminal: advance status (covers manual compress → next flow)
+      updateExperimentStatus(getDb(root), exp.id, 'merged');
+      fmt.success(`Experiment ${exp.slug} merged.`);
+      break;
+    case ExperimentStatus.DEAD_END:
+      fmt.info(`Experiment ${exp.slug} is dead-ended. No further action.`);
+      break;
     default:
       fmt.warn(`Don't know how to execute step: ${step}`);
   }

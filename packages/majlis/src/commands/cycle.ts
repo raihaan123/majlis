@@ -73,8 +73,9 @@ export async function resolveCmd(args: string[]): Promise<void> {
   // Validate state: must be verified to resolve
   transition(exp.status as ExperimentStatus, ExperimentStatus.RESOLVED);
 
+  // resolve() in resolve.ts sets the correct terminal status:
+  //   sound/good → merged, weak → building, rejected → dead_end
   await resolveExperiment(db, exp, root);
-  updateExperimentStatus(db, exp.id, 'resolved');
 }
 
 async function doGate(db: ReturnType<typeof getDb>, exp: Experiment, root: string): Promise<void> {

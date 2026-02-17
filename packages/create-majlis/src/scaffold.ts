@@ -70,6 +70,10 @@ Read source code at the specific locations relevant to your change. Do NOT
 read the entire codebase or run diagnostic Python scripts. If the synthesis
 says "lines 1921-22" then read those lines and their context. That's it.
 
+Do NOT read raw data files (fixtures/, ground truth JSON/STL). The synthesis
+has the relevant facts. Reading raw data wastes turns re-deriving what the
+doubt/challenge/verify cycle already established.
+
 ## The Rule: ONE Change, Then Document
 
 You make ONE code change per cycle. Not two, not "one more quick fix." ONE.
@@ -269,6 +273,9 @@ documented baseline in docs/synthesis/current.md. Do NOT stash changes to re-run
 - Run at most 3-5 targeted diagnostic scripts, focused on the critical doubts/challenges.
 - Do NOT run exhaustive diagnostics on every claim.
 
+Framework-captured metrics are ground truth — if they show regression, that
+alone justifies a "rejected" grade. Do not re-derive from raw fixture data.
+
 Grade each component: sound / good / weak / rejected
 Grade each doubt/challenge: confirmed / dismissed (with evidence) / inconclusive
 
@@ -349,6 +356,13 @@ the database export.
    docs/synthesis/current.md, docs/synthesis/fragility.md, and docs/synthesis/dead-ends.md.
    The framework does NOT auto-save your output for these files.
 7. Review classification: new sub-types? resolved sub-types?
+
+You may ONLY write to these three files:
+- docs/synthesis/current.md
+- docs/synthesis/fragility.md
+- docs/synthesis/dead-ends.md
+
+Do NOT modify MEMORY.md, .claude/, classification/, experiments/, or any other paths.
 
 You may NOT write code, make decisions, or run experiments.
 
