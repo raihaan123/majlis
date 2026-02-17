@@ -270,12 +270,19 @@ export async function spawnAgent(
 /**
  * Spawn a small synthesiser micro-agent (for resolve step).
  * Not a full role — just a focused Sonnet call.
+ *
+ * Options:
+ *   maxTurns — default 5. Set lower for tool-free planning calls.
+ *   tools    — default ['Read', 'Glob', 'Grep']. Pass [] for pure-reasoning calls.
  */
 export async function spawnSynthesiser(
   context: AgentContext,
   projectRoot?: string,
+  opts?: { maxTurns?: number; tools?: string[] },
 ): Promise<AgentResult> {
   const root = projectRoot ?? findProjectRoot() ?? process.cwd();
+  const maxTurns = opts?.maxTurns ?? 5;
+  const tools = opts?.tools ?? ['Read', 'Glob', 'Grep'];
 
   const contextJson = JSON.stringify(context);
   const taskPrompt = context.taskPrompt ?? 'Synthesise the findings into actionable builder guidance.';
@@ -288,15 +295,15 @@ export async function spawnSynthesiser(
     'The framework parses this programmatically — if you omit it, the pipeline breaks. ' +
     'Format: <!-- majlis-json {"guidance": "your guidance here"} -->';
 
-  console.log(`[synthesiser] Spawning (maxTurns: 5)...`);
+  console.log(`[synthesiser] Spawning (maxTurns: ${maxTurns})...`);
 
   const { text: markdown, costUsd, truncated } = await runQuery({
     prompt,
     model: 'sonnet',
-    tools: ['Read', 'Glob', 'Grep'],
+    tools,
     systemPrompt,
     cwd: root,
-    maxTurns: 5,
+    maxTurns,
     label: 'synthesiser',
     role: 'synthesiser',
   });

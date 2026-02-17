@@ -15,6 +15,7 @@ import {
 } from './db/queries.js';
 import { spawnSynthesiser } from './agents/spawn.js';
 import { execSync } from 'node:child_process';
+import { autoCommit } from './git.js';
 import * as fmt from './output/format.js';
 
 /**
@@ -66,6 +67,7 @@ export async function resolve(
         .map(g => `- **${g.component}**: ${g.notes ?? 'minor gaps'}`)
         .join('\n');
       appendToFragilityMap(projectRoot, exp.slug, gaps);
+      autoCommit(projectRoot, `resolve: fragility gaps from ${exp.slug}`);
       updateExperimentStatus(db, exp.id, 'merged');
       fmt.success(`Experiment ${exp.slug} MERGED (good, ${grades.filter(g => g.grade === 'good').length} gaps added to fragility map).`);
       break;
@@ -219,6 +221,13 @@ export async function resolveDbOnly(
 
 function gitMerge(branch: string, cwd: string): void {
   try {
+    // Must be on main/master to merge the experiment branch into it.
+    // Without this, `git merge exp/foo` while on exp/foo is a no-op.
+    execSync('git checkout main 2>/dev/null || git checkout master', {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     execSync(`git merge ${branch} --no-ff -m "Merge experiment branch ${branch}"`, {
       cwd,
       encoding: 'utf-8',

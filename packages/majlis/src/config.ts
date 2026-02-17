@@ -82,3 +82,18 @@ export function truncateContext(content: string, limit: number): string {
   if (content.length <= limit) return content;
   return content.slice(0, limit) + '\n[TRUNCATED]';
 }
+
+/** Read the most recent diagnosis report, if any exist. */
+export function readLatestDiagnosis(projectRoot: string): string {
+  const dir = path.join(projectRoot, 'docs', 'diagnosis');
+  try {
+    const files = fs.readdirSync(dir)
+      .filter(f => f.startsWith('diagnosis-') && f.endsWith('.md'))
+      .sort()
+      .reverse();
+    if (files.length === 0) return '';
+    return fs.readFileSync(path.join(dir, files[0]), 'utf-8');
+  } catch {
+    return '';
+  }
+}

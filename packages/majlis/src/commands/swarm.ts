@@ -11,7 +11,7 @@ import {
   getExperimentBySlug,
 } from '../db/queries.js';
 import { spawnSynthesiser, generateSlug } from '../agents/spawn.js';
-import { loadConfig, readFileOrEmpty, truncateContext, CONTEXT_LIMITS, getFlagValue } from '../config.js';
+import { loadConfig, readFileOrEmpty, readLatestDiagnosis, truncateContext, CONTEXT_LIMITS, getFlagValue } from '../config.js';
 import { createWorktree, initializeWorktree, cleanupWorktree } from '../swarm/worktree.js';
 import { runExperimentInWorktree } from '../swarm/runner.js';
 import { aggregateSwarmResults } from '../swarm/aggregate.js';
@@ -219,6 +219,7 @@ async function deriveMultipleHypotheses(
     readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'dead-ends.md')),
     CONTEXT_LIMITS.deadEnds,
   );
+  const diagnosis = truncateContext(readLatestDiagnosis(root), CONTEXT_LIMITS.synthesis);
   const db = getDb(root);
   const deadEnds = listAllDeadEnds(db);
   const config = loadConfig(root);
@@ -241,7 +242,7 @@ async function deriveMultipleHypotheses(
 
 ## Goal
 ${goal}
-
+${diagnosis ? `\n## Latest Diagnosis Report (PRIORITISE — deep analysis from diagnostician agent)\n${diagnosis}\n` : ''}
 ## Current Metrics
 ${metricsOutput || '(no metrics configured)'}
 
@@ -261,6 +262,8 @@ Note: [structural] dead ends are HARD CONSTRAINTS — hypotheses MUST NOT repeat
 [procedural] dead ends are process failures — the approach may still be valid if executed differently.
 
 ## Your Task
+DO NOT read source code or use tools. All context you need is above. Plan from the synthesis and dead-end registry.
+
 1. Assess: based on the metrics and synthesis, has the goal been met? Be specific.
 2. If YES — output the JSON block below with goal_met: true.
 3. If NO — generate exactly ${count} DIVERSE hypotheses for parallel testing.
@@ -278,7 +281,7 @@ CRITICAL: Your LAST line of output MUST be EXACTLY this format (on its own line,
 
 If the goal is met:
 <!-- majlis-json {"goal_met": true, "hypotheses": []} -->`,
-  }, root);
+  }, root, { maxTurns: 2, tools: [] });
 
   // Parse response
   if (result.structured?.goal_met === true) return [];

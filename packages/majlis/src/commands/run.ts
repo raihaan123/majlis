@@ -18,8 +18,9 @@ import { next } from './next.js';
 import { cycle } from './cycle.js';
 import { spawnSynthesiser, generateSlug } from '../agents/spawn.js';
 import type { MajlisConfig, Experiment } from '../types.js';
-import { loadConfig, readFileOrEmpty, truncateContext, CONTEXT_LIMITS } from '../config.js';
+import { loadConfig, readFileOrEmpty, readLatestDiagnosis, truncateContext, CONTEXT_LIMITS } from '../config.js';
 import { isShutdownRequested } from '../shutdown.js';
+import { autoCommit } from '../git.js';
 import * as fmt from '../output/format.js';
 
 /**
@@ -95,6 +96,7 @@ export async function run(args: string[]): Promise<void> {
 
       // Create the experiment programmatically
       exp = await createNewExperiment(db, root, hypothesis);
+      autoCommit(root, `new: ${exp.slug}`);
       fmt.success(`Created experiment #${exp.id}: ${exp.slug}`);
     }
 
@@ -155,6 +157,7 @@ async function deriveNextHypothesis(
   const synthesis = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md')), CONTEXT_LIMITS.synthesis);
   const fragility = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'fragility.md')), CONTEXT_LIMITS.fragility);
   const deadEndsDoc = truncateContext(readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'dead-ends.md')), CONTEXT_LIMITS.deadEnds);
+  const diagnosis = truncateContext(readLatestDiagnosis(root), CONTEXT_LIMITS.synthesis);
   const deadEnds = listAllDeadEnds(db);
   const config = loadConfig(root);
 
@@ -178,7 +181,7 @@ async function deriveNextHypothesis(
 
 ## Goal
 ${goal}
-
+${diagnosis ? `\n## Latest Diagnosis Report (PRIORITISE — deep analysis from diagnostician agent)\n${diagnosis}\n` : ''}
 ## Current Metrics
 ${metricsOutput || '(no metrics configured)'}
 
@@ -198,6 +201,8 @@ Note: [structural] dead ends are HARD CONSTRAINTS — your hypothesis MUST NOT r
 [procedural] dead ends are process failures — the approach may still be valid if executed differently.
 
 ## Your Task
+DO NOT read source code or use tools. All context you need is above. Plan from the synthesis and dead-end registry.
+
 1. Assess: based on the metrics and synthesis, has the goal been met? Be specific.
 2. If YES — output the JSON block below with goal_met: true.
 3. If NO — propose the SINGLE most promising next experiment hypothesis.
@@ -213,7 +218,7 @@ CRITICAL: Your LAST line of output MUST be EXACTLY this format (on its own line,
 
 If the goal is met:
 <!-- majlis-json {"goal_met": true, "hypothesis": null} -->`,
-  }, root);
+  }, root, { maxTurns: 2, tools: [] });
 
   // Parse the planner's response
   const structured = result.structured;
@@ -244,7 +249,7 @@ If the goal is met:
   fmt.warn('Planner did not return structured output. Retrying with focused prompt...');
   const retry = await spawnSynthesiser({
     taskPrompt: `Based on this analysis, output ONLY a single-line JSON block:\n\n${result.output.slice(-2000)}\n\n<!-- majlis-json {"goal_met": false, "hypothesis": "your hypothesis"} -->`,
-  }, root);
+  }, root, { maxTurns: 1, tools: [] });
 
   if (retry.structured?.hypothesis) return retry.structured.hypothesis;
 

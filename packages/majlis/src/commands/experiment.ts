@@ -11,6 +11,7 @@ import {
 } from '../db/queries.js';
 import { loadConfig, getFlagValue } from '../config.js';
 import { generateSlug } from '../agents/spawn.js';
+import { autoCommit } from '../git.js';
 import * as fmt from '../output/format.js';
 
 export async function newExperiment(args: string[]): Promise<void> {
@@ -74,6 +75,8 @@ export async function newExperiment(args: string[]): Promise<void> {
     fs.writeFileSync(logPath, logContent);
     fmt.info(`Created experiment log: docs/experiments/${paddedNum}-${slug}.md`);
   }
+
+  autoCommit(root, `new: ${slug}`);
 
   // Auto-baseline if configured
   if (config.cycle.auto_baseline_on_new_experiment && config.metrics.command) {

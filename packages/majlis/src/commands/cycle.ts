@@ -36,6 +36,7 @@ import type { Experiment, Doubt } from '../types.js';
 import type { StructuredOutput } from '../agents/types.js';
 import { loadConfig, readFileOrEmpty, truncateContext, CONTEXT_LIMITS } from '../config.js';
 import { parseMetricsOutput } from '../metrics.js';
+import { autoCommit } from '../git.js';
 import * as fmt from '../output/format.js';
 
 export async function cycle(step: string, args: string[]): Promise<void> {
@@ -530,6 +531,7 @@ async function doCompress(db: ReturnType<typeof getDb>, root: string): Promise<v
 
   recordCompression(db, sessionCount, sizeBefore, sizeAfter);
 
+  autoCommit(root, 'compress: update synthesis');
   fmt.success(`Compression complete. Synthesis: ${sizeBefore}B → ${sizeAfter}B`);
 }
 

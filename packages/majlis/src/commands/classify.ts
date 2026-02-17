@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import { spawnAgent } from '../agents/spawn.js';
+import { autoCommit } from '../git.js';
 import * as fmt from '../output/format.js';
 
 export async function classify(args: string[]): Promise<void> {
@@ -32,6 +33,7 @@ export async function classify(args: string[]): Promise<void> {
       `Write the classification to docs/classification/ following the template.`,
   }, root);
 
+  autoCommit(root, `classify: ${domain.slice(0, 60)}`);
   fmt.success('Classification complete. Check docs/classification/ for the output.');
 }
 
@@ -80,5 +82,6 @@ export async function reframe(args: string[]): Promise<void> {
       `Write to docs/reframes/.`,
   }, root);
 
+  autoCommit(root, `reframe: ${target.slice(0, 60)}`);
   fmt.success('Reframe complete. Check docs/reframes/ for the output.');
 }

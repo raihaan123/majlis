@@ -5,6 +5,7 @@ import { getDb, findProjectRoot } from '../db/connection.js';
 import { exportForDiagnostician } from '../db/queries.js';
 import { spawnAgent } from '../agents/spawn.js';
 import { loadConfig, readFileOrEmpty } from '../config.js';
+import { autoCommit } from '../git.js';
 import * as fmt from '../output/format.js';
 
 /**
@@ -109,5 +110,6 @@ export async function diagnose(args: string[]): Promise<void> {
     fmt.warn('Diagnostician was truncated (hit 60 turn limit).');
   }
 
+  autoCommit(root, `diagnosis: ${focus || 'general'}`);
   fmt.success('Diagnosis complete.');
 }
