@@ -121,9 +121,19 @@ async function main(): Promise<void> {
         await run(rest);
         break;
       }
+      case 'swarm': {
+        const { swarm } = await import('./commands/swarm.js');
+        await swarm(rest);
+        break;
+      }
       case 'audit': {
         const { audit } = await import('./commands/audit.js');
         await audit(rest);
+        break;
+      }
+      case 'diagnose': {
+        const { diagnose } = await import('./commands/diagnose.js');
+        await diagnose(rest);
         break;
       }
       default:
@@ -179,6 +189,7 @@ Queries:
 
 Audit:
   audit "objective"          Maqasid check — is the frame right?
+  diagnose ["focus area"]    Deep diagnosis — root causes, patterns, gaps
 
 Sessions:
   session start "intent"     Declare session intent
@@ -186,6 +197,7 @@ Sessions:
 
 Orchestration:
   run "goal"                 Autonomous orchestration until goal met
+  swarm "goal" [--parallel N] Run N experiments in parallel worktrees
 
 Flags:
   --json                     Output as JSON

@@ -449,6 +449,45 @@ export function getFindingsByExperiment(db: Database.Database, experimentId: num
   return db.prepare('SELECT * FROM findings WHERE experiment_id = ? ORDER BY created_at').all(experimentId);
 }
 
+// ── Swarm Tracking ─────────────────────────────────────────
+
+export function createSwarmRun(
+  db: Database.Database, goal: string, parallelCount: number,
+): { id: number } {
+  const result = db.prepare(`
+    INSERT INTO swarm_runs (goal, parallel_count) VALUES (?, ?)
+  `).run(goal, parallelCount);
+  return { id: result.lastInsertRowid as number };
+}
+
+export function updateSwarmRun(
+  db: Database.Database, id: number,
+  status: string, totalCostUsd: number, bestSlug: string | null,
+): void {
+  db.prepare(`
+    UPDATE swarm_runs SET status = ?, total_cost_usd = ?, best_experiment_slug = ?,
+      completed_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(status, totalCostUsd, bestSlug, id);
+}
+
+export function addSwarmMember(
+  db: Database.Database, swarmRunId: number, slug: string, worktreePath: string,
+): void {
+  db.prepare(`
+    INSERT INTO swarm_members (swarm_run_id, experiment_slug, worktree_path) VALUES (?, ?, ?)
+  `).run(swarmRunId, slug, worktreePath);
+}
+
+export function updateSwarmMember(
+  db: Database.Database, swarmRunId: number, slug: string,
+  finalStatus: string, overallGrade: string | null, costUsd: number, error: string | null,
+): void {
+  db.prepare(`
+    UPDATE swarm_members SET final_status = ?, overall_grade = ?, cost_usd = ?, error = ?
+    WHERE swarm_run_id = ? AND experiment_slug = ?
+  `).run(finalStatus, overallGrade, costUsd, error, swarmRunId, slug);
+}
+
 // ── Compressor Export ───────────────────────────────────────
 
 /**
@@ -520,6 +559,96 @@ export function exportForCompressor(db: Database.Database, maxLength: number = 3
     sections.push('## Unresolved Doubts');
     for (const d of unresolvedDoubts) {
       sections.push(`- [${d.severity}] ${d.claim_doubted} (exp: ${d.experiment_slug})`);
+    }
+  }
+
+  const full = sections.join('\n');
+  if (full.length > maxLength) {
+    return full.slice(0, maxLength) + `\n\n[TRUNCATED — full export was ${full.length} chars]`;
+  }
+  return full;
+}
+
+/**
+ * Extended DB export for the diagnostician agent.
+ * Includes everything from exportForCompressor plus metric history,
+ * session history, compression history, swarm runs, reframes, and findings.
+ */
+export function exportForDiagnostician(db: Database.Database, maxLength: number = 60000): string {
+  const base = exportForCompressor(db, maxLength);
+  const sections: string[] = [base];
+
+  // Metric history across all experiments
+  const metrics = db.prepare(`
+    SELECT m.*, e.slug FROM metrics m
+    JOIN experiments e ON m.experiment_id = e.id
+    ORDER BY m.captured_at
+  `).all() as Array<MetricSnapshot & { slug: string }>;
+
+  if (metrics.length > 0) {
+    sections.push('\n## Metric History (all experiments)');
+    for (const m of metrics) {
+      sections.push(`- ${m.slug} [${m.phase}] ${m.fixture}/${m.metric_name}: ${m.metric_value}`);
+    }
+  }
+
+  // Session history
+  const sessions = db.prepare('SELECT * FROM sessions ORDER BY started_at').all() as Session[];
+  if (sessions.length > 0) {
+    sections.push('\n## Session History');
+    for (const s of sessions) {
+      sections.push(`- #${s.id}: "${s.intent}" (${s.ended_at ? 'ended' : 'active'})`);
+      if (s.accomplished) sections.push(`  accomplished: ${s.accomplished}`);
+      if (s.unfinished) sections.push(`  unfinished: ${s.unfinished}`);
+      if (s.new_fragility) sections.push(`  fragility: ${s.new_fragility}`);
+    }
+  }
+
+  // Compression history
+  const compressions = db.prepare('SELECT * FROM compressions ORDER BY created_at').all() as Compression[];
+  if (compressions.length > 0) {
+    sections.push('\n## Compression History');
+    for (const c of compressions) {
+      sections.push(`- #${c.id}: ${c.synthesis_size_before}B → ${c.synthesis_size_after}B (${c.session_count_since_last} sessions)`);
+    }
+  }
+
+  // Swarm run history (table may not exist in older DBs)
+  try {
+    const swarmRuns = db.prepare('SELECT * FROM swarm_runs ORDER BY created_at').all() as Array<Record<string, unknown>>;
+    if (swarmRuns.length > 0) {
+      sections.push('\n## Swarm History');
+      for (const sr of swarmRuns) {
+        sections.push(`- #${sr.id}: "${sr.goal}" (${sr.status}, best: ${sr.best_experiment_slug ?? 'none'})`);
+      }
+    }
+  } catch { /* swarm tables may not exist */ }
+
+  // Reframe history
+  const reframes = db.prepare(`
+    SELECT r.*, e.slug FROM reframes r
+    JOIN experiments e ON r.experiment_id = e.id
+    ORDER BY r.created_at
+  `).all() as Array<Record<string, unknown>>;
+  if (reframes.length > 0) {
+    sections.push('\n## Reframe History');
+    for (const r of reframes) {
+      const decomp = String(r.decomposition ?? '').slice(0, 200);
+      sections.push(`- ${r.slug}: ${decomp}`);
+      if (r.recommendation) sections.push(`  recommendation: ${String(r.recommendation).slice(0, 200)}`);
+    }
+  }
+
+  // Scout findings
+  const findings = db.prepare(`
+    SELECT f.*, e.slug FROM findings f
+    JOIN experiments e ON f.experiment_id = e.id
+    ORDER BY f.created_at
+  `).all() as Array<Record<string, unknown>>;
+  if (findings.length > 0) {
+    sections.push('\n## Scout Findings');
+    for (const f of findings) {
+      sections.push(`- ${f.slug}: ${f.approach} (${f.source}) ${f.contradicts_current ? '[CONTRADICTS CURRENT]' : ''}`);
     }
   }
 

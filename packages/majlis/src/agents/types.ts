@@ -65,6 +65,13 @@ export interface StructuredOutput {
     new_dead_ends: string[];
     fragility_changes: string[];
   };
+  // Diagnostician output
+  diagnosis?: {
+    root_causes: string[];
+    patterns: string[];
+    evidence_gaps: string[];
+    investigation_directions: string[];
+  };
 }
 
 export interface AgentContext {
@@ -125,6 +132,8 @@ export function getExtractionSchema(role: string): string {
       return '{"findings": [{"approach": "string", "source": "string", "relevance": "string", "contradicts_current": true}]}';
     case 'compressor':
       return '{"compression_report": {"synthesis_delta": "string", "new_dead_ends": ["string"], "fragility_changes": ["string"]}}';
+    case 'diagnostician':
+      return '{"diagnosis": {"root_causes": ["string"], "patterns": ["string"], "evidence_gaps": ["string"], "investigation_directions": ["string"]}}';
     default:
       return EXTRACTION_SCHEMA;
   }
@@ -142,4 +151,5 @@ export const ROLE_REQUIRED_FIELDS: Record<string, string[]> = {
   reframer:   ['reframe'],
   scout:      ['findings'],
   compressor: ['compression_report'],
+  diagnostician: ['diagnosis'],
 };

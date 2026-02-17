@@ -189,7 +189,8 @@ function hasData(output: StructuredOutput): boolean {
     output.guidance ||
     output.reframe ||
     output.compression_report ||
-    output.gate_decision
+    output.gate_decision ||
+    output.diagnosis
   );
 }
 

@@ -51,6 +51,7 @@ const ROLE_MAX_TURNS: Record<string, number> = {
   reframer: 20,
   scout: 20,
   gatekeeper: 10,
+  diagnostician: 60,
 };
 
 /** Tool-use intervals at which to inject checkpoint grounding reminders. */
@@ -60,6 +61,7 @@ const CHECKPOINT_INTERVAL: Record<string, number> = {
   critic: 15,
   adversary: 15,
   compressor: 15,
+  diagnostician: 20,
 };
 
 /**
@@ -93,6 +95,11 @@ function buildCheckpointMessage(role: string, toolUseCount: number, maxTurns: nu
         `- Have you updated current.md, fragility.md, dead-ends.md?\n` +
         `- If yes → output compression report JSON.\n` +
         `- Do NOT write to MEMORY.md or files outside docs/synthesis/.`;
+    case 'diagnostician':
+      return `${header}\nYou are READ-ONLY for project code. Write ONLY to .majlis/scripts/.\n` +
+        `Focus on diagnosis, not fixing. Your value is insight, not implementation.\n` +
+        `Phase 1 (1-10): orientation. Phase 2 (11-40): deep investigation. Phase 3 (41-60): synthesis.\n` +
+        `If you are past turn 40, begin compiling your diagnostic report.`;
     default:
       return `${header}\nCheck: is your core task done? If yes, wrap up and output JSON.`;
   }
@@ -121,6 +128,42 @@ function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined 
       { matcher: 'Edit', hooks: [guardHook] },
     ];
   }
+
+  if (role === 'diagnostician') {
+    // Write/Edit restricted to .majlis/scripts/ only
+    const writeGuard: HookCallback = async (input) => {
+      const toolInput = (input as any).tool_input ?? {};
+      const filePath: string = toolInput.file_path ?? '';
+      if (filePath && !filePath.includes('/.majlis/scripts/')) {
+        return {
+          decision: 'block' as const,
+          reason: `Diagnostician may only write to .majlis/scripts/. Blocked: ${filePath}`,
+        };
+      }
+      return {};
+    };
+
+    // Bash: block destructive commands
+    const bashGuard: HookCallback = async (input) => {
+      const toolInput = (input as any).tool_input ?? {};
+      const command: string = toolInput.command ?? '';
+      const destructive = /\b(rm\s+-rf|git\s+(checkout|reset|stash|clean|push)|chmod|chown|mkfs|dd\s+if=)\b/i;
+      if (destructive.test(command)) {
+        return {
+          decision: 'block' as const,
+          reason: `Diagnostician blocked destructive command: ${command.slice(0, 100)}`,
+        };
+      }
+      return {};
+    };
+
+    return [
+      { matcher: 'Write', hooks: [writeGuard] },
+      { matcher: 'Edit', hooks: [writeGuard] },
+      { matcher: 'Bash', hooks: [bashGuard] },
+    ];
+  }
+
   return undefined;
 }
 
@@ -508,7 +551,7 @@ function writeArtifact(
   // Builder and compressor manage their own files via Write/Edit tool calls.
   // Writing the raw agent output here would OVERWRITE their clean docs with
   // the full monologue (all reasoning text between tool calls).
-  if (role === 'builder' || role === 'compressor') return null;
+  if (role === 'builder' || role === 'compressor' || role === 'diagnostician') return null;
 
   const fullDir = path.join(projectRoot, dir);
   if (!fs.existsSync(fullDir)) {

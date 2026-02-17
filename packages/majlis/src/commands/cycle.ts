@@ -78,6 +78,40 @@ export async function resolveCmd(args: string[]): Promise<void> {
   await resolveExperiment(db, exp, root);
 }
 
+/**
+ * Execute a cycle step with explicit db/root params.
+ * Used by the swarm runner which manages its own DB connections.
+ */
+export async function runStep(
+  step: string,
+  db: ReturnType<typeof getDb>,
+  exp: Experiment,
+  root: string,
+): Promise<void> {
+  switch (step) {
+    case 'build': return doBuild(db, exp, root);
+    case 'challenge': return doChallenge(db, exp, root);
+    case 'doubt': return doDoubt(db, exp, root);
+    case 'scout': return doScout(db, exp, root);
+    case 'verify': return doVerify(db, exp, root);
+    case 'gate': return doGate(db, exp, root);
+    case 'compress': return doCompress(db, root);
+  }
+}
+
+/**
+ * Resolve with explicit db/root params.
+ * Used by the swarm runner.
+ */
+export async function runResolve(
+  db: ReturnType<typeof getDb>,
+  exp: Experiment,
+  root: string,
+): Promise<void> {
+  transition(exp.status as ExperimentStatus, ExperimentStatus.RESOLVED);
+  await resolveExperiment(db, exp, root);
+}
+
 async function doGate(db: ReturnType<typeof getDb>, exp: Experiment, root: string): Promise<void> {
   transition(exp.status as ExperimentStatus, ExperimentStatus.GATED);
 

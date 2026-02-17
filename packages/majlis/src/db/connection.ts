@@ -87,3 +87,19 @@ export function openTestDb(): Database.Database {
   runMigrations(db);
   return db;
 }
+
+/**
+ * Open a file-backed database at a specific project root. Does NOT set the singleton.
+ * Used by swarm worktrees which need independent DB connections.
+ */
+export function openDbAt(projectRoot: string): Database.Database {
+  const majlisDir = path.join(projectRoot, '.majlis');
+  if (!fs.existsSync(majlisDir)) {
+    fs.mkdirSync(majlisDir, { recursive: true });
+  }
+  const db = new Database(path.join(majlisDir, 'majlis.db'));
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  runMigrations(db);
+  return db;
+}

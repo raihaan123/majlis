@@ -166,6 +166,37 @@ const migrations: Migration[] = [
         CHECK(category IN ('structural', 'procedural'));
     `);
   },
+
+  // Migration 005: v4 → v5 — Swarm tracking tables
+  (db) => {
+    db.exec(`
+      CREATE TABLE swarm_runs (
+        id INTEGER PRIMARY KEY,
+        goal TEXT NOT NULL,
+        parallel_count INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running'
+          CHECK(status IN ('running', 'completed', 'failed')),
+        total_cost_usd REAL DEFAULT 0,
+        best_experiment_slug TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME
+      );
+
+      CREATE TABLE swarm_members (
+        id INTEGER PRIMARY KEY,
+        swarm_run_id INTEGER REFERENCES swarm_runs(id),
+        experiment_slug TEXT NOT NULL,
+        worktree_path TEXT NOT NULL,
+        final_status TEXT,
+        overall_grade TEXT,
+        cost_usd REAL DEFAULT 0,
+        error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX idx_swarm_members_run ON swarm_members(swarm_run_id);
+    `);
+  },
 ];
 
 /**

@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 describe('Migrations', () => {
-  it('creates all 12 tables', () => {
+  it('creates all 14 tables', () => {
     const tables = db.prepare(`
       SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
     `).all() as Array<{ name: string }>;
@@ -59,13 +59,13 @@ describe('Migrations', () => {
     assert.deepEqual(names, [
       'challenges', 'compressions', 'dead_ends', 'decisions', 'doubts',
       'experiments', 'findings', 'metrics', 'reframes', 'sessions',
-      'sub_type_failures', 'verifications',
+      'sub_type_failures', 'swarm_members', 'swarm_runs', 'verifications',
     ]);
   });
 
-  it('sets user_version to 4', () => {
+  it('sets user_version to 5', () => {
     const version = db.pragma('user_version', { simple: true });
-    assert.equal(version, 4);
+    assert.equal(version, 5);
   });
 
   it('has builder_guidance column on experiments', () => {
@@ -77,7 +77,7 @@ describe('Migrations', () => {
   it('is idempotent', () => {
     const db2 = openTestDb();
     const version = db2.pragma('user_version', { simple: true });
-    assert.equal(version, 4);
+    assert.equal(version, 5);
   });
 });
 
