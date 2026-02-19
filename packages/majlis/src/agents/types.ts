@@ -72,6 +72,26 @@ export interface StructuredOutput {
     evidence_gaps: string[];
     investigation_directions: string[];
   };
+  // Cartographer output (scan)
+  architecture?: {
+    modules: string[];
+    entry_points: string[];
+    key_abstractions: string[];
+    dependency_graph: string;
+  };
+  // Toolsmith output (scan)
+  toolsmith?: {
+    metrics_command: string | null;
+    build_command: string | null;
+    test_command: string | null;
+    test_framework: string | null;
+    pre_measure: string | null;
+    post_measure: string | null;
+    fixtures: Record<string, unknown>;
+    tracked: Record<string, { direction: string; target?: number }>;
+    verification_output: string;
+    issues: string[];
+  };
 }
 
 export interface AgentContext {
@@ -134,6 +154,10 @@ export function getExtractionSchema(role: string): string {
       return '{"compression_report": {"synthesis_delta": "string", "new_dead_ends": ["string"], "fragility_changes": ["string"]}}';
     case 'diagnostician':
       return '{"diagnosis": {"root_causes": ["string"], "patterns": ["string"], "evidence_gaps": ["string"], "investigation_directions": ["string"]}}';
+    case 'cartographer':
+      return '{"architecture": {"modules": ["string"], "entry_points": ["string"], "key_abstractions": ["string"], "dependency_graph": "string"}}';
+    case 'toolsmith':
+      return '{"toolsmith": {"metrics_command": "string|null", "build_command": "string|null", "test_command": "string|null", "test_framework": "string|null", "pre_measure": "string|null", "post_measure": "string|null", "fixtures": {}, "tracked": {}, "verification_output": "string", "issues": ["string"]}}';
     default:
       return EXTRACTION_SCHEMA;
   }
@@ -152,4 +176,6 @@ export const ROLE_REQUIRED_FIELDS: Record<string, string[]> = {
   scout:      ['findings'],
   compressor: ['compression_report'],
   diagnostician: ['diagnosis'],
+  cartographer:  ['architecture'],
+  toolsmith:     ['toolsmith'],
 };

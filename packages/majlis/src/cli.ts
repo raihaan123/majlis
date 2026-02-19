@@ -141,6 +141,16 @@ async function main(): Promise<void> {
         await diagnose(rest);
         break;
       }
+      case 'scan': {
+        const { scan } = await import('./commands/scan.js');
+        await scan(rest);
+        break;
+      }
+      case 'resync': {
+        const { resync } = await import('./commands/resync.js');
+        await resync(rest);
+        break;
+      }
       default:
         console.error(`Unknown command: ${command}`);
         printHelp();
@@ -160,7 +170,9 @@ majlis v${VERSION} — Structured multi-agent problem solving
 Usage: majlis <command> [options]
 
 Lifecycle:
-  init                       Initialize Majlis in current project
+  init [--scan]              Initialize Majlis in current project
+  scan [--force]             Scan codebase to auto-detect config + write synthesis
+  resync [--check] [--force] Update stale synthesis after project evolution
   upgrade                    Sync agents, commands, hooks from CLI version
   status [--json]            Show experiment states and cycle position
 

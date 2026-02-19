@@ -1,6 +1,6 @@
 {
   "name": "create-majlis",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Scaffold the Majlis Framework into a project",
   "bin": {
     "create-majlis": "./dist/index.js"

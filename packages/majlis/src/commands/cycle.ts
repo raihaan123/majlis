@@ -141,6 +141,9 @@ async function doGate(db: ReturnType<typeof getDb>, exp: Experiment, root: strin
     synthesis,
     taskPrompt:
       `Gate-check hypothesis for experiment ${exp.slug}:\n"${exp.hypothesis}"\n\n` +
+      'This is a FAST gate — decide in 1-2 turns. Do NOT read source code or large files. ' +
+      'Use the synthesis, dead-ends, and fragility provided in your context. ' +
+      'At most, do one targeted grep to verify a function name exists.\n\n' +
       'Check: (a) stale references — does the hypothesis reference specific lines, functions, or structures that may not exist? ' +
       '(b) dead-end overlap — does this hypothesis repeat an approach already ruled out by structural dead-ends? ' +
       '(c) scope — is this a single focused change, or does it try to do multiple things?\n\n' +

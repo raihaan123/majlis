@@ -52,6 +52,8 @@ const ROLE_MAX_TURNS: Record<string, number> = {
   scout: 20,
   gatekeeper: 10,
   diagnostician: 60,
+  cartographer: 40,
+  toolsmith: 30,
 };
 
 /** Tool-use intervals at which to inject checkpoint grounding reminders. */
@@ -61,7 +63,10 @@ const CHECKPOINT_INTERVAL: Record<string, number> = {
   critic: 15,
   adversary: 15,
   compressor: 15,
+  gatekeeper: 2,
   diagnostician: 20,
+  cartographer: 12,
+  toolsmith: 10,
 };
 
 /**
@@ -95,11 +100,23 @@ function buildCheckpointMessage(role: string, toolUseCount: number, maxTurns: nu
         `- Have you updated current.md, fragility.md, dead-ends.md?\n` +
         `- If yes → output compression report JSON.\n` +
         `- Do NOT write to MEMORY.md or files outside docs/synthesis/.`;
+    case 'gatekeeper':
+      return `${header}\nThis is a FAST gate. You have 10 turns MAX.\n` +
+        `DO NOT read source code or large files. Decide from the context provided.\n` +
+        `Output your gate_decision JSON NOW — grade (sound/good/weak/fail) + reasoning.`;
     case 'diagnostician':
       return `${header}\nYou are READ-ONLY for project code. Write ONLY to .majlis/scripts/.\n` +
         `Focus on diagnosis, not fixing. Your value is insight, not implementation.\n` +
         `Phase 1 (1-10): orientation. Phase 2 (11-40): deep investigation. Phase 3 (41-60): synthesis.\n` +
         `If you are past turn 40, begin compiling your diagnostic report.`;
+    case 'cartographer':
+      return `${header}\nYou write ONLY to docs/synthesis/. You are mapping architecture.\n` +
+        `Phase 1 (1-10): orientation. Phase 2 (11-30): architecture mapping. Phase 3 (31-40): write synthesis.\n` +
+        `If you are past turn 30, begin writing current.md and fragility.md NOW.`;
+    case 'toolsmith':
+      return `${header}\nYou write ONLY to .majlis/scripts/. Verify toolchain, create metrics wrapper.\n` +
+        `Phase 1 (1-10): verify toolchain. Phase 2 (11-25): create metrics.sh. Phase 3 (26-30): output config JSON.\n` +
+        `If you are past turn 25, output your structured JSON NOW.`;
     default:
       return `${header}\nCheck: is your core task done? If yes, wrap up and output JSON.`;
   }
@@ -152,6 +169,60 @@ function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined 
         return {
           decision: 'block' as const,
           reason: `Diagnostician blocked destructive command: ${command.slice(0, 100)}`,
+        };
+      }
+      return {};
+    };
+
+    return [
+      { matcher: 'Write', hooks: [writeGuard] },
+      { matcher: 'Edit', hooks: [writeGuard] },
+      { matcher: 'Bash', hooks: [bashGuard] },
+    ];
+  }
+
+  if (role === 'cartographer') {
+    const guardHook: HookCallback = async (input) => {
+      const toolInput = (input as any).tool_input ?? {};
+      const filePath: string = toolInput.file_path ?? '';
+      if (filePath && !filePath.includes('/docs/synthesis/')) {
+        return {
+          decision: 'block' as const,
+          reason: `Cartographer may only write to docs/synthesis/. Blocked: ${filePath}`,
+        };
+      }
+      return {};
+    };
+
+    return [
+      { matcher: 'Write', hooks: [guardHook] },
+      { matcher: 'Edit', hooks: [guardHook] },
+    ];
+  }
+
+  if (role === 'toolsmith') {
+    // Write/Edit restricted to .majlis/scripts/ only
+    const writeGuard: HookCallback = async (input) => {
+      const toolInput = (input as any).tool_input ?? {};
+      const filePath: string = toolInput.file_path ?? '';
+      if (filePath && !filePath.includes('/.majlis/scripts/')) {
+        return {
+          decision: 'block' as const,
+          reason: `Toolsmith may only write to .majlis/scripts/. Blocked: ${filePath}`,
+        };
+      }
+      return {};
+    };
+
+    // Bash: block destructive commands
+    const bashGuard: HookCallback = async (input) => {
+      const toolInput = (input as any).tool_input ?? {};
+      const command: string = toolInput.command ?? '';
+      const destructive = /\b(rm\s+-rf|git\s+(checkout|reset|stash|clean|push)|chmod|chown|mkfs|dd\s+if=)\b/i;
+      if (destructive.test(command)) {
+        return {
+          decision: 'block' as const,
+          reason: `Toolsmith blocked destructive command: ${command.slice(0, 100)}`,
         };
       }
       return {};
@@ -558,7 +629,7 @@ function writeArtifact(
   // Builder and compressor manage their own files via Write/Edit tool calls.
   // Writing the raw agent output here would OVERWRITE their clean docs with
   // the full monologue (all reasoning text between tool calls).
-  if (role === 'builder' || role === 'compressor' || role === 'diagnostician') return null;
+  if (role === 'builder' || role === 'compressor' || role === 'diagnostician' || role === 'cartographer' || role === 'toolsmith') return null;
 
   const fullDir = path.join(projectRoot, dir);
   if (!fs.existsSync(fullDir)) {
