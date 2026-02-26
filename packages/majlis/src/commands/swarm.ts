@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import {
   createSwarmRun,
@@ -7,9 +7,10 @@ import {
   addSwarmMember,
   updateSwarmMember,
   listAllDeadEnds,
-  updateExperimentStatus,
   getExperimentBySlug,
 } from '../db/queries.js';
+import { adminTransitionAndPersist } from '../state/machine.js';
+import { ExperimentStatus } from '../state/types.js';
 import { spawnSynthesiser, generateSlug } from '../agents/spawn.js';
 import { loadConfig, readFileOrEmpty, readLatestDiagnosis, truncateContext, CONTEXT_LIMITS, getFlagValue } from '../config.js';
 import { createWorktree, initializeWorktree, cleanupWorktree } from '../swarm/worktree.js';
@@ -75,6 +76,26 @@ export async function swarm(args: string[]): Promise<void> {
     fmt.info(`  ${i + 1}. ${hypotheses[i]}`);
   }
 
+  // Cleanup orphaned worktrees from prior crashed runs
+  try {
+    const worktreeList = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: root, encoding: 'utf-8',
+    });
+    const orphaned = worktreeList.split('\n')
+      .filter(line => line.startsWith('worktree '))
+      .map(line => line.replace('worktree ', ''))
+      .filter(p => p.includes('-swarm-'));
+    for (const orphanPath of orphaned) {
+      try {
+        execFileSync('git', ['worktree', 'remove', orphanPath, '--force'], { cwd: root, encoding: 'utf-8' });
+        fmt.info(`Cleaned up orphaned worktree: ${path.basename(orphanPath)}`);
+      } catch { /* best effort */ }
+    }
+    if (orphaned.length > 0) {
+      execFileSync('git', ['worktree', 'prune'], { cwd: root, encoding: 'utf-8' });
+    }
+  } catch { /* ignore cleanup errors */ }
+
   // Phase 2: Create worktrees
   const worktrees: WorktreeInfo[] = [];
   for (let i = 0; i < hypotheses.length; i++) {
@@ -103,80 +124,84 @@ export async function swarm(args: string[]): Promise<void> {
   fmt.info(`Running ${worktrees.length} experiments in parallel...`);
   fmt.info('');
 
-  // Phase 3: Run experiments in parallel
-  const settled = await Promise.allSettled(
-    worktrees.map(wt => runExperimentInWorktree(wt)),
-  );
+  let results: SwarmExperimentResult[];
+  let summary: ReturnType<typeof aggregateSwarmResults>;
 
-  // Collect results
-  const results: SwarmExperimentResult[] = settled.map((s, i) => {
-    if (s.status === 'fulfilled') return s.value;
-    return {
-      worktree: worktrees[i],
-      experiment: null,
-      finalStatus: 'error',
-      overallGrade: null,
-      costUsd: 0,
-      stepCount: 0,
-      error: s.reason instanceof Error ? s.reason.message : String(s.reason),
-    };
-  });
-
-  // Update swarm members in main DB
-  for (const r of results) {
-    updateSwarmMember(
-      db, swarmRun.id, r.worktree.slug,
-      r.finalStatus, r.overallGrade, r.costUsd, r.error ?? null,
+  try {
+    // Phase 3: Run experiments in parallel
+    const settled = await Promise.allSettled(
+      worktrees.map(wt => runExperimentInWorktree(wt)),
     );
-  }
 
-  fmt.info('');
-  fmt.header('Aggregation');
+    // Collect results
+    results = settled.map((s, i) => {
+      if (s.status === 'fulfilled') return s.value;
+      return {
+        worktree: worktrees[i],
+        experiment: null,
+        finalStatus: 'error',
+        overallGrade: null,
+        costUsd: 0,
+        stepCount: 0,
+        error: s.reason instanceof Error ? s.reason.message : String(s.reason),
+      };
+    });
 
-  // Phase 4: Aggregate results into main DB
-  const summary = aggregateSwarmResults(root, db, results);
-  summary.goal = goal;
-
-  // Phase 5: Git merge best experiment
-  if (summary.bestExperiment && isMergeable(summary.bestExperiment.overallGrade)) {
-    const best = summary.bestExperiment;
-    fmt.info(`Best experiment: ${best.worktree.slug} (${best.overallGrade})`);
-
-    try {
-      execSync(
-        `git merge ${best.worktree.branch} --no-ff -m "Merge swarm winner: ${best.worktree.slug}"`,
-        { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    // Update swarm members in main DB
+    for (const r of results) {
+      updateSwarmMember(
+        db, swarmRun.id, r.worktree.slug,
+        r.finalStatus, r.overallGrade, r.costUsd, r.error ?? null,
       );
-      fmt.success(`Merged ${best.worktree.slug} into main.`);
-    } catch {
-      fmt.warn(`Git merge of ${best.worktree.slug} failed. Merge manually with:`);
-      fmt.info(`  git merge ${best.worktree.branch} --no-ff`);
     }
-  } else {
-    fmt.info('No experiment achieved sound/good grade. Nothing merged.');
-  }
 
-  // Mark non-best experiments as dead-ends in main DB (for learnings)
-  for (const r of results) {
-    if (r === summary.bestExperiment || r.error || !r.experiment) continue;
-    const mainExp = getExperimentBySlug(db, r.worktree.slug);
-    if (mainExp && mainExp.status !== 'dead_end') {
-      updateExperimentStatus(db, mainExp.id, 'dead_end');
+    fmt.info('');
+    fmt.header('Aggregation');
+
+    // Phase 4: Aggregate results into main DB
+    summary = aggregateSwarmResults(root, db, results);
+    summary.goal = goal;
+
+    // Phase 5: Git merge best experiment
+    if (summary.bestExperiment && isMergeable(summary.bestExperiment.overallGrade)) {
+      const best = summary.bestExperiment;
+      fmt.info(`Best experiment: ${best.worktree.slug} (${best.overallGrade})`);
+
+      try {
+        execFileSync('git', ['merge', best.worktree.branch, '--no-ff', '-m', `Merge swarm winner: ${best.worktree.slug}`],
+          { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+        );
+        fmt.success(`Merged ${best.worktree.slug} into main.`);
+      } catch {
+        fmt.warn(`Git merge of ${best.worktree.slug} failed. Merge manually with:`);
+        fmt.info(`  git merge ${best.worktree.branch} --no-ff`);
+      }
+    } else {
+      fmt.info('No experiment achieved sound/good grade. Nothing merged.');
     }
-  }
 
-  // Phase 6: Update swarm run record
-  updateSwarmRun(
-    db, swarmRun.id,
-    summary.errorCount === results.length ? 'failed' : 'completed',
-    summary.totalCostUsd,
-    summary.bestExperiment?.worktree.slug ?? null,
-  );
+    // Mark non-best experiments as dead-ends in main DB (for learnings)
+    for (const r of results) {
+      if (r === summary.bestExperiment || r.error || !r.experiment) continue;
+      const mainExp = getExperimentBySlug(db, r.worktree.slug);
+      if (mainExp && mainExp.status !== 'dead_end') {
+        adminTransitionAndPersist(db, mainExp.id, mainExp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'error_recovery');
+      }
+    }
 
-  // Phase 7: Cleanup worktrees
-  fmt.info('Cleaning up worktrees...');
-  for (const wt of worktrees) {
-    cleanupWorktree(root, wt);
+    // Phase 6: Update swarm run record
+    updateSwarmRun(
+      db, swarmRun.id,
+      summary.errorCount === results.length ? 'failed' : 'completed',
+      summary.totalCostUsd,
+      summary.bestExperiment?.worktree.slug ?? null,
+    );
+  } finally {
+    // Phase 7: Cleanup worktrees — always runs, even on crash
+    fmt.info('Cleaning up worktrees...');
+    for (const wt of worktrees) {
+      cleanupWorktree(root, wt);
+    }
   }
 
   // Phase 8: Print summary

@@ -74,6 +74,9 @@ export function closeDb(): void {
  * Reset the singleton — used for testing with different DBs.
  */
 export function resetDb(): void {
+  if (_db) {
+    try { _db.close(); } catch { /* ignore close errors */ }
+  }
   _db = null;
 }
 

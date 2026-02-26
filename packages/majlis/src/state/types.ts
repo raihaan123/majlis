@@ -28,7 +28,7 @@ export const TRANSITIONS: Record<ExperimentStatus, ExperimentStatus[]> = {
   [ExperimentStatus.SCOUTED]:     [ExperimentStatus.VERIFYING],
   [ExperimentStatus.VERIFYING]:   [ExperimentStatus.VERIFIED],
   [ExperimentStatus.VERIFIED]:    [ExperimentStatus.RESOLVED],
-  [ExperimentStatus.RESOLVED]:    [ExperimentStatus.COMPRESSED, ExperimentStatus.BUILDING],  // cycle-back skips gate
+  [ExperimentStatus.RESOLVED]:    [ExperimentStatus.COMPRESSED, ExperimentStatus.BUILDING, ExperimentStatus.MERGED, ExperimentStatus.DEAD_END],
   [ExperimentStatus.COMPRESSED]:  [ExperimentStatus.MERGED, ExperimentStatus.BUILDING],      // cycle-back skips gate
   [ExperimentStatus.MERGED]:      [],
   [ExperimentStatus.DEAD_END]:    [],
@@ -37,3 +37,26 @@ export const TRANSITIONS: Record<ExperimentStatus, ExperimentStatus[]> = {
 export type Grade = 'sound' | 'good' | 'weak' | 'rejected';
 
 export const GRADE_ORDER: Grade[] = ['rejected', 'weak', 'good', 'sound'];
+
+// Admin (force) transition reasons — bypass normal TRANSITIONS for recovery / bootstrap
+export type AdminReason = 'revert' | 'circuit_breaker' | 'error_recovery' | 'bootstrap';
+
+/**
+ * Allowed admin transitions per reason.
+ * Each entry maps a reason to a validator: (current, target) → boolean.
+ */
+export const ADMIN_TRANSITIONS: Record<AdminReason, (current: ExperimentStatus, target: ExperimentStatus) => boolean> = {
+  revert: (current, target) =>
+    target === ExperimentStatus.DEAD_END && !isTerminalStatus(current),
+  circuit_breaker: (current, target) =>
+    target === ExperimentStatus.DEAD_END && !isTerminalStatus(current),
+  error_recovery: (current, target) =>
+    target === ExperimentStatus.DEAD_END && !isTerminalStatus(current),
+  bootstrap: (current, target) =>
+    current === ExperimentStatus.CLASSIFIED && target === ExperimentStatus.REFRAMED,
+};
+
+/** Check if a status is terminal (no valid outgoing transitions). */
+function isTerminalStatus(status: ExperimentStatus): boolean {
+  return TRANSITIONS[status].length === 0;
+}

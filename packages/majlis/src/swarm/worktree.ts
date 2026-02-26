@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { openDbAt } from '../db/connection.js';
 import type { WorktreeInfo } from './types.js';
 import * as fmt from '../output/format.js';
@@ -19,7 +19,7 @@ export function createWorktree(
   const worktreePath = path.join(path.dirname(mainRoot), worktreeName);
   const branch = `swarm/${paddedNum}-${slug}`;
 
-  execSync(`git worktree add ${JSON.stringify(worktreePath)} -b ${branch}`, {
+  execFileSync('git', ['worktree', 'add', worktreePath, '-b', branch], {
     cwd: mainRoot,
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -89,7 +89,7 @@ export function initializeWorktree(mainRoot: string, worktreePath: string): void
  */
 export function cleanupWorktree(mainRoot: string, wt: WorktreeInfo): void {
   try {
-    execSync(`git worktree remove ${JSON.stringify(wt.path)} --force`, {
+    execFileSync('git', ['worktree', 'remove', wt.path, '--force'], {
       cwd: mainRoot,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -100,7 +100,7 @@ export function cleanupWorktree(mainRoot: string, wt: WorktreeInfo): void {
 
   // Also delete the branch
   try {
-    execSync(`git branch -D ${wt.branch}`, {
+    execFileSync('git', ['branch', '-D', wt.branch], {
       cwd: mainRoot,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],

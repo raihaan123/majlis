@@ -4,12 +4,11 @@ import { openDbAt } from '../db/connection.js';
 import {
   createExperiment,
   getExperimentBySlug,
-  updateExperimentStatus,
   insertDeadEnd,
   hasDoubts as dbHasDoubts,
   hasChallenges,
 } from '../db/queries.js';
-import { validNext, determineNextStep, isTerminal } from '../state/machine.js';
+import { validNext, determineNextStep, isTerminal, transitionAndPersist, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
 import { runStep } from '../commands/cycle.js';
 import { resolveDbOnly } from '../resolve.js';
@@ -40,7 +39,7 @@ export async function runExperimentInWorktree(
 
     // Create experiment in worktree DB — start at 'reframed' (skip classify/reframe)
     exp = createExperiment(db, wt.slug, wt.branch, wt.hypothesis, null, null);
-    updateExperimentStatus(db, exp.id, 'reframed');
+    adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.REFRAMED, 'bootstrap');
     exp.status = 'reframed';
 
     // Create experiment log from template
@@ -98,18 +97,18 @@ export async function runExperimentInWorktree(
       // Handle compressed → merged transition
       if (nextStep === ExperimentStatus.COMPRESSED) {
         await runStep('compress', db, exp, wt.path);
-        updateExperimentStatus(db, exp.id, 'compressed');
+        transitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.COMPRESSED);
         continue;
       }
 
       if (nextStep === ExperimentStatus.MERGED) {
-        updateExperimentStatus(db, exp.id, 'merged');
+        transitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.MERGED);
         fmt.success(`${label} Merged.`);
         break;
       }
 
       if (nextStep === ExperimentStatus.REFRAMED) {
-        updateExperimentStatus(db, exp.id, 'reframed');
+        adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.REFRAMED, 'bootstrap');
         continue;
       }
 
@@ -128,7 +127,7 @@ export async function runExperimentInWorktree(
         try {
           insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug, message,
             `Process failure: ${message}`, exp.sub_type, 'procedural');
-          updateExperimentStatus(db, exp.id, 'dead_end');
+          adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'error_recovery');
         } catch { /* best effort */ }
         break;
       }

@@ -74,9 +74,10 @@ describe('TRANSITIONS map', () => {
     ]);
   });
 
-  it('resolved can go to compressed or building (cycle back skips gate)', () => {
+  it('resolved can go to compressed, building, merged, or dead_end', () => {
     assert.deepEqual(TRANSITIONS[ExperimentStatus.RESOLVED], [
       ExperimentStatus.COMPRESSED, ExperimentStatus.BUILDING,
+      ExperimentStatus.MERGED, ExperimentStatus.DEAD_END,
     ]);
   });
 

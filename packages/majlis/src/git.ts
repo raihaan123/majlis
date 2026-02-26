@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import * as fmt from './output/format.js';
 
 /**
@@ -9,9 +9,11 @@ import * as fmt from './output/format.js';
 export function autoCommit(root: string, message: string): void {
   try {
     // Stage docs/ and .majlis/scripts/ only
-    execSync('git add docs/ .majlis/scripts/ 2>/dev/null; true', {
-      cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    try {
+      execFileSync('git', ['add', 'docs/', '.majlis/scripts/'], {
+        cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch { /* paths may not exist — fine */ }
 
     // Check if there's anything staged
     const diff = execSync('git diff --cached --stat', {
@@ -20,7 +22,7 @@ export function autoCommit(root: string, message: string): void {
 
     if (!diff) return; // Nothing to commit
 
-    execSync(`git commit -m ${JSON.stringify(`[majlis] ${message}`)}`, {
+    execFileSync('git', ['commit', '-m', `[majlis] ${message}`], {
       cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     });
     fmt.info(`Auto-committed: ${message}`);

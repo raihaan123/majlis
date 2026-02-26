@@ -123,15 +123,24 @@ function buildCheckpointMessage(role: string, toolUseCount: number, maxTurns: nu
 }
 
 /**
+ * Check whether a resolved file path is inside a given allowed directory.
+ */
+function isInsideDir(filePath: string, allowedDir: string): boolean {
+  const resolved = path.resolve(filePath);
+  return resolved.startsWith(allowedDir + path.sep) || resolved === allowedDir;
+}
+
+/**
  * Build PreToolUse guard hooks for structural enforcement.
  * Returns undefined if the role has no guards.
  */
-function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined {
+function buildPreToolUseGuards(role: string, cwd: string): HookCallbackMatcher[] | undefined {
   if (role === 'compressor') {
+    const allowedDir = path.resolve(cwd, 'docs', 'synthesis');
     const guardHook: HookCallback = async (input) => {
       const toolInput = (input as any).tool_input ?? {};
       const filePath: string = toolInput.file_path ?? '';
-      if (filePath && !filePath.includes('/docs/synthesis/')) {
+      if (filePath && !isInsideDir(filePath, allowedDir)) {
         return {
           decision: 'block' as const,
           reason: `Compressor may only write to docs/synthesis/. Blocked: ${filePath}`,
@@ -147,11 +156,12 @@ function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined 
   }
 
   if (role === 'diagnostician') {
+    const allowedDir = path.resolve(cwd, '.majlis', 'scripts');
     // Write/Edit restricted to .majlis/scripts/ only
     const writeGuard: HookCallback = async (input) => {
       const toolInput = (input as any).tool_input ?? {};
       const filePath: string = toolInput.file_path ?? '';
-      if (filePath && !filePath.includes('/.majlis/scripts/')) {
+      if (filePath && !isInsideDir(filePath, allowedDir)) {
         return {
           decision: 'block' as const,
           reason: `Diagnostician may only write to .majlis/scripts/. Blocked: ${filePath}`,
@@ -164,7 +174,7 @@ function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined 
     const bashGuard: HookCallback = async (input) => {
       const toolInput = (input as any).tool_input ?? {};
       const command: string = toolInput.command ?? '';
-      const destructive = /\b(rm\s+-rf|git\s+(checkout|reset|stash|clean|push)|chmod|chown|mkfs|dd\s+if=)\b/i;
+      const destructive = /\b(rm\s+(-\w*[rf]|--recursive|--force)|git\s+(checkout|reset|stash|clean|push\s+--force)|chmod|chown|mkfs|dd\s+if=|sudo\s)/i;
       if (destructive.test(command)) {
         return {
           decision: 'block' as const,
@@ -182,10 +192,11 @@ function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined 
   }
 
   if (role === 'cartographer') {
+    const allowedDir = path.resolve(cwd, 'docs', 'synthesis');
     const guardHook: HookCallback = async (input) => {
       const toolInput = (input as any).tool_input ?? {};
       const filePath: string = toolInput.file_path ?? '';
-      if (filePath && !filePath.includes('/docs/synthesis/')) {
+      if (filePath && !isInsideDir(filePath, allowedDir)) {
         return {
           decision: 'block' as const,
           reason: `Cartographer may only write to docs/synthesis/. Blocked: ${filePath}`,
@@ -201,11 +212,12 @@ function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined 
   }
 
   if (role === 'toolsmith') {
+    const allowedDir = path.resolve(cwd, '.majlis', 'scripts');
     // Write/Edit restricted to .majlis/scripts/ only
     const writeGuard: HookCallback = async (input) => {
       const toolInput = (input as any).tool_input ?? {};
       const filePath: string = toolInput.file_path ?? '';
-      if (filePath && !filePath.includes('/.majlis/scripts/')) {
+      if (filePath && !isInsideDir(filePath, allowedDir)) {
         return {
           decision: 'block' as const,
           reason: `Toolsmith may only write to .majlis/scripts/. Blocked: ${filePath}`,
@@ -218,7 +230,7 @@ function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined 
     const bashGuard: HookCallback = async (input) => {
       const toolInput = (input as any).tool_input ?? {};
       const command: string = toolInput.command ?? '';
-      const destructive = /\b(rm\s+-rf|git\s+(checkout|reset|stash|clean|push)|chmod|chown|mkfs|dd\s+if=)\b/i;
+      const destructive = /\b(rm\s+(-\w*[rf]|--recursive|--force)|git\s+(checkout|reset|stash|clean|push\s+--force)|chmod|chown|mkfs|dd\s+if=|sudo\s)/i;
       if (destructive.test(command)) {
         return {
           decision: 'block' as const,
@@ -235,6 +247,64 @@ function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined 
     ];
   }
 
+  if (role === 'builder') {
+    // Block destructive commands
+    const bashGuard: HookCallback = async (input) => {
+      const toolInput = (input as any).tool_input ?? {};
+      const command: string = toolInput.command ?? '';
+      const destructive = /\b(rm\s+(-\w*[rf]|--recursive|--force)|git\s+(checkout|reset|stash|clean|push\s+--force)|chmod|chown|mkfs|dd\s+if=|sudo\s)/i;
+      if (destructive.test(command)) {
+        return { decision: 'block' as const, reason: `Builder blocked destructive command: ${command.slice(0, 100)}` };
+      }
+      return {};
+    };
+
+    // Block writes to framework config
+    const configFile = path.resolve(cwd, '.majlis', 'config.json');
+    const dbFile = path.resolve(cwd, '.majlis', 'majlis.db');
+    const settingsFile = path.resolve(cwd, '.claude', 'settings.json');
+    const configGuard: HookCallback = async (input) => {
+      const toolInput = (input as any).tool_input ?? {};
+      const filePath: string = toolInput.file_path ?? '';
+      if (filePath) {
+        const resolved = path.resolve(filePath);
+        if (resolved === configFile || resolved === dbFile || resolved === settingsFile) {
+          return { decision: 'block' as const, reason: `Builder may not modify framework files: ${filePath}` };
+        }
+      }
+      return {};
+    };
+
+    return [
+      { matcher: 'Bash', hooks: [bashGuard] },
+      { matcher: 'Write', hooks: [configGuard] },
+      { matcher: 'Edit', hooks: [configGuard] },
+    ];
+  }
+
+  if (role === 'verifier') {
+    // Block writes to framework config
+    const configFile = path.resolve(cwd, '.majlis', 'config.json');
+    const dbFile = path.resolve(cwd, '.majlis', 'majlis.db');
+    const settingsFile = path.resolve(cwd, '.claude', 'settings.json');
+    const configGuard: HookCallback = async (input) => {
+      const toolInput = (input as any).tool_input ?? {};
+      const filePath: string = toolInput.file_path ?? '';
+      if (filePath) {
+        const resolved = path.resolve(filePath);
+        if (resolved === configFile || resolved === dbFile || resolved === settingsFile) {
+          return { decision: 'block' as const, reason: `Verifier may not modify framework files: ${filePath}` };
+        }
+      }
+      return {};
+    };
+
+    return [
+      { matcher: 'Write', hooks: [configGuard] },
+      { matcher: 'Edit', hooks: [configGuard] },
+    ];
+  }
+
   return undefined;
 }
 
@@ -245,6 +315,7 @@ function buildPreToolUseGuards(role: string): HookCallbackMatcher[] | undefined 
 function buildAgentHooks(
   role: string,
   maxTurns: number,
+  cwd: string,
 ): Partial<Record<HookEvent, HookCallbackMatcher[]>> | undefined {
   const result: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {};
   let hasHooks = false;
@@ -272,7 +343,7 @@ function buildAgentHooks(
   }
 
   // PreToolUse: structural guards (e.g. compressor write scope)
-  const guards = buildPreToolUseGuards(role);
+  const guards = buildPreToolUseGuards(role, cwd);
   if (guards) {
     result.PreToolUse = guards;
     hasHooks = true;
@@ -471,7 +542,7 @@ async function runQuery(opts: {
 }): Promise<{ text: string; costUsd: number; truncated: boolean }> {
   let truncated = false;
   const tag = opts.label ?? 'majlis';
-  const hooks = opts.role ? buildAgentHooks(opts.role, opts.maxTurns ?? 15) : undefined;
+  const hooks = opts.role ? buildAgentHooks(opts.role, opts.maxTurns ?? 15, opts.cwd) : undefined;
   const conversation = query({
     prompt: opts.prompt,
     options: {

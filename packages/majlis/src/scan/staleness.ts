@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
 import type { MajlisConfig } from '../types.js';
 import type { ProjectProfile } from './surface.js';
@@ -82,8 +82,8 @@ export function getLastActivityTimestamp(db: Database.Database): ActivityInfo {
 
 function getCommitsSince(root: string, timestamp: string): number {
   try {
-    const output = execSync(
-      `git log --since="${timestamp}" --oneline -- . ":!.majlis/" ":!docs/"`,
+    const output = execFileSync(
+      'git', ['log', `--since=${timestamp}`, '--oneline', '--', '.', ':!.majlis/', ':!docs/'],
       { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     ).trim();
     if (!output) return 0;
@@ -96,15 +96,15 @@ function getCommitsSince(root: string, timestamp: string): number {
 function getGitDiffStat(root: string, timestamp: string): { stat: string; filesChanged: number } {
   try {
     // Find the commit closest to the timestamp
-    const baseRef = execSync(
-      `git rev-list -1 --before="${timestamp}" HEAD`,
+    const baseRef = execFileSync(
+      'git', ['rev-list', '-1', `--before=${timestamp}`, 'HEAD'],
       { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     ).trim();
 
     if (!baseRef) return { stat: '', filesChanged: 0 };
 
-    const stat = execSync(
-      `git diff --stat ${baseRef} -- . ":!.majlis/" ":!docs/"`,
+    const stat = execFileSync(
+      'git', ['diff', '--stat', baseRef, '--', '.', ':!.majlis/', ':!docs/'],
       { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     ).trim();
 

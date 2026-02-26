@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import {
   getLatestExperiment,
@@ -10,9 +10,8 @@ import {
   getSessionsSinceCompression,
   createExperiment,
   getExperimentBySlug,
-  updateExperimentStatus,
 } from '../db/queries.js';
-import { isTerminal } from '../state/machine.js';
+import { isTerminal, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
 import { next } from './next.js';
 import { cycle } from './cycle.js';
@@ -122,7 +121,7 @@ export async function run(args: string[]): Promise<void> {
       try {
         insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug, message,
           `Process failure: ${message}`, exp.sub_type, 'procedural');
-        updateExperimentStatus(db, exp.id, 'dead_end');
+        adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'error_recovery');
       } catch (innerErr) {
         const innerMsg = innerErr instanceof Error ? innerErr.message : String(innerErr);
         fmt.warn(`Could not record dead-end: ${innerMsg}`);
@@ -284,7 +283,7 @@ async function createNewExperiment(
   // Create git branch
   const branch = `exp/${paddedNum}-${finalSlug}`;
   try {
-    execSync(`git checkout -b ${branch}`, {
+    execFileSync('git', ['checkout', '-b', branch], {
       cwd: root,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -297,7 +296,7 @@ async function createNewExperiment(
   // Create DB entry — start at 'reframed' so it goes straight to building
   // (classify/reframe are session-level, already done by the planner)
   const exp = createExperiment(db, finalSlug, branch, hypothesis, null, null);
-  updateExperimentStatus(db, exp.id, 'reframed');
+  adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.REFRAMED, 'bootstrap');
   exp.status = 'reframed';
 
   // Create experiment log from template

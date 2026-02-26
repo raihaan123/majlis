@@ -4,7 +4,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "npm run build -w packages/shared && npm run build -w packages/majlis && npm run build -w packages/create-majlis",
     "test": "npm test --workspaces --if-present",
     "clean": "rm -rf packages/*/dist"
   }

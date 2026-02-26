@@ -47,7 +47,7 @@ export async function extractStructuredData(
  * Tier 1: Extract <!-- majlis-json ... --> block from markdown.
  */
 export function extractMajlisJsonBlock(markdown: string): string | null {
-  const match = markdown.match(/<!--\s*majlis-json\s*\n([\s\S]*?)-->/);
+  const match = markdown.match(/<!--\s*majlis-json\s*\n?([\s\S]*?)-->/);
   if (!match) return null;
   return match[1].trim();
 }

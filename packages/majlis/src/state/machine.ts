@@ -1,5 +1,8 @@
-import { ExperimentStatus, TRANSITIONS } from './types.js';
+import { ExperimentStatus, TRANSITIONS, ADMIN_TRANSITIONS } from './types.js';
+import type { AdminReason } from './types.js';
 import type { Experiment } from '../types.js';
+import { updateExperimentStatus } from '../db/queries.js';
+import type Database from 'better-sqlite3';
 
 /**
  * Validate and execute a state transition.
@@ -27,6 +30,53 @@ export function validNext(current: ExperimentStatus): ExperimentStatus[] {
  */
 export function isTerminal(status: ExperimentStatus): boolean {
   return TRANSITIONS[status].length === 0;
+}
+
+/**
+ * Validate and execute an admin (force) transition.
+ * Throws if the transition is not allowed for the given reason.
+ */
+export function adminTransition(
+  current: ExperimentStatus,
+  target: ExperimentStatus,
+  reason: AdminReason,
+): ExperimentStatus {
+  const allowed = ADMIN_TRANSITIONS[reason];
+  if (!allowed(current, target)) {
+    throw new Error(
+      `Invalid admin transition (${reason}): ${current} → ${target}`
+    );
+  }
+  return target;
+}
+
+/**
+ * Validate a normal transition and persist it to the database atomically.
+ */
+export function transitionAndPersist(
+  db: Database.Database,
+  experimentId: number,
+  current: ExperimentStatus,
+  target: ExperimentStatus,
+): ExperimentStatus {
+  const result = transition(current, target);
+  updateExperimentStatus(db, experimentId, result);
+  return result;
+}
+
+/**
+ * Validate an admin transition and persist it to the database atomically.
+ */
+export function adminTransitionAndPersist(
+  db: Database.Database,
+  experimentId: number,
+  current: ExperimentStatus,
+  target: ExperimentStatus,
+  reason: AdminReason,
+): ExperimentStatus {
+  const result = adminTransition(current, target, reason);
+  updateExperimentStatus(db, experimentId, result);
+  return result;
 }
 
 /**
@@ -78,6 +128,27 @@ export function determineNextStep(
     if (valid.includes(ExperimentStatus.VERIFYING)) {
       return ExperimentStatus.VERIFYING;
     }
+  }
+
+  // building → advance to built
+  if (status === ExperimentStatus.BUILDING) {
+    return valid.includes(ExperimentStatus.BUILT)
+      ? ExperimentStatus.BUILT
+      : valid[0];
+  }
+
+  // scouted → advance to verifying
+  if (status === ExperimentStatus.SCOUTED) {
+    return valid.includes(ExperimentStatus.VERIFYING)
+      ? ExperimentStatus.VERIFYING
+      : valid[0];
+  }
+
+  // verified → advance to resolved
+  if (status === ExperimentStatus.VERIFIED) {
+    return valid.includes(ExperimentStatus.RESOLVED)
+      ? ExperimentStatus.RESOLVED
+      : valid[0];
   }
 
   // compressed → advance to merged (final step before terminal)

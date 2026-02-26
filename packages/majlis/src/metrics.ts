@@ -24,8 +24,10 @@ export function compareMetrics(
       const a = after.find(m => m.fixture === fixture && m.metric_name === metric);
 
       if (b && a) {
-        const direction = config.metrics.tracked[metric]?.direction ?? 'lower_is_better';
-        const regression = isRegression(b.metric_value, a.metric_value, direction);
+        const tracked = config.metrics.tracked[metric];
+        const direction = tracked?.direction ?? 'lower_is_better';
+        const target = tracked?.target;
+        const regression = isRegression(b.metric_value, a.metric_value, direction, target);
 
         comparisons.push({
           fixture,
@@ -42,15 +44,15 @@ export function compareMetrics(
   return comparisons;
 }
 
-function isRegression(before: number, after: number, direction: string): boolean {
+function isRegression(before: number, after: number, direction: string, target?: number): boolean {
   switch (direction) {
     case 'lower_is_better':
       return after > before;
     case 'higher_is_better':
       return after < before;
     case 'closer_to_gt':
-      // Without ground truth, we can't determine regression — assume no regression
-      return false;
+      if (target === undefined) return false; // No ground truth configured
+      return Math.abs(after - target) > Math.abs(before - target);
     default:
       return false;
   }

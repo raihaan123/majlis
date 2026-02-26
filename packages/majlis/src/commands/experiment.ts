@@ -1,14 +1,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import {
   createExperiment,
   getExperimentBySlug,
   getLatestExperiment,
-  updateExperimentStatus,
   insertDeadEnd,
 } from '../db/queries.js';
+import { adminTransitionAndPersist } from '../state/machine.js';
+import { ExperimentStatus } from '../state/types.js';
 import { loadConfig, getFlagValue } from '../config.js';
 import { generateSlug } from '../agents/spawn.js';
 import { autoCommit } from '../git.js';
@@ -42,7 +43,7 @@ export async function newExperiment(args: string[]): Promise<void> {
   // Create git branch
   const branch = `exp/${paddedNum}-${slug}`;
   try {
-    execSync(`git checkout -b ${branch}`, {
+    execFileSync('git', ['checkout', '-b', branch], {
       cwd: root,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -121,22 +122,30 @@ export async function revert(args: string[]): Promise<void> {
     category,
   );
 
-  // Update status
-  updateExperimentStatus(db, exp.id, 'dead_end');
+  // Update status via validated admin transition
+  adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
 
   // Handle git branch
   try {
-    const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', {
+    const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: root,
       encoding: 'utf-8',
     }).trim();
 
     if (currentBranch === exp.branch) {
-      execSync('git checkout main 2>/dev/null || git checkout master', {
-        cwd: root,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      try {
+        execFileSync('git', ['checkout', 'main'], {
+          cwd: root,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch {
+        execFileSync('git', ['checkout', 'master'], {
+          cwd: root,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      }
     }
   } catch {
     fmt.warn('Could not switch git branches — do this manually.');

@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import {
   getExperimentBySlug,
@@ -554,7 +554,7 @@ function gitCommitBuild(exp: Experiment, cwd: string): void {
       return;
     }
     const msg = `EXP-${String(exp.id).padStart(3, '0')}: ${exp.slug}\n\n${exp.hypothesis ?? ''}`;
-    execSync(`git commit -m ${JSON.stringify(msg)}`, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    execFileSync('git', ['commit', '-m', msg], { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
     fmt.info(`Committed builder changes on ${exp.branch}.`);
   } catch {
     fmt.warn('Could not auto-commit builder changes — commit manually before resolving.');
@@ -584,58 +584,60 @@ function ingestStructuredOutput(
 ): void {
   if (!structured) return;
 
-  if (structured.decisions) {
-    for (const d of structured.decisions) {
-      insertDecision(db, experimentId, d.description, d.evidence_level, d.justification);
+  db.transaction(() => {
+    if (structured.decisions) {
+      for (const d of structured.decisions) {
+        insertDecision(db, experimentId, d.description, d.evidence_level, d.justification);
+      }
+      fmt.info(`Ingested ${structured.decisions.length} decision(s)`);
     }
-    fmt.info(`Ingested ${structured.decisions.length} decision(s)`);
-  }
 
-  if (structured.grades) {
-    for (const g of structured.grades) {
-      insertVerification(
-        db, experimentId, g.component, g.grade,
-        g.provenance_intact ?? null,
-        g.content_correct ?? null,
-        g.notes ?? null,
-      );
+    if (structured.grades) {
+      for (const g of structured.grades) {
+        insertVerification(
+          db, experimentId, g.component, g.grade,
+          g.provenance_intact ?? null,
+          g.content_correct ?? null,
+          g.notes ?? null,
+        );
+      }
+      fmt.info(`Ingested ${structured.grades.length} verification grade(s)`);
     }
-    fmt.info(`Ingested ${structured.grades.length} verification grade(s)`);
-  }
 
-  if (structured.doubts) {
-    for (const d of structured.doubts) {
-      insertDoubt(
+    if (structured.doubts) {
+      for (const d of structured.doubts) {
+        insertDoubt(
+          db, experimentId,
+          d.claim_doubted, d.evidence_level_of_claim,
+          d.evidence_for_doubt, d.severity,
+        );
+      }
+      fmt.info(`Ingested ${structured.doubts.length} doubt(s)`);
+    }
+
+    if (structured.challenges) {
+      for (const c of structured.challenges) {
+        insertChallenge(db, experimentId, c.description, c.reasoning);
+      }
+      fmt.info(`Ingested ${structured.challenges.length} challenge(s)`);
+    }
+
+    if (structured.reframe) {
+      insertReframe(
         db, experimentId,
-        d.claim_doubted, d.evidence_level_of_claim,
-        d.evidence_for_doubt, d.severity,
+        structured.reframe.decomposition,
+        JSON.stringify(structured.reframe.divergences),
+        structured.reframe.recommendation,
       );
+      fmt.info(`Ingested reframe`);
     }
-    fmt.info(`Ingested ${structured.doubts.length} doubt(s)`);
-  }
 
-  if (structured.challenges) {
-    for (const c of structured.challenges) {
-      insertChallenge(db, experimentId, c.description, c.reasoning);
+    if (structured.findings) {
+      for (const f of structured.findings) {
+        insertFinding(db, experimentId, f.approach, f.source, f.relevance, f.contradicts_current);
+      }
+      fmt.info(`Ingested ${structured.findings.length} finding(s)`);
     }
-    fmt.info(`Ingested ${structured.challenges.length} challenge(s)`);
-  }
-
-  if (structured.reframe) {
-    insertReframe(
-      db, experimentId,
-      structured.reframe.decomposition,
-      JSON.stringify(structured.reframe.divergences),
-      structured.reframe.recommendation,
-    );
-    fmt.info(`Ingested reframe`);
-  }
-
-  if (structured.findings) {
-    for (const f of structured.findings) {
-      insertFinding(db, experimentId, f.approach, f.source, f.relevance, f.contradicts_current);
-    }
-    fmt.info(`Ingested ${structured.findings.length} finding(s)`);
-  }
+  })();
 }
 

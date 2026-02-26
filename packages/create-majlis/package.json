@@ -1,6 +1,6 @@
 {
   "name": "create-majlis",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "description": "Scaffold the Majlis Framework into a project",
   "bin": {
     "create-majlis": "./dist/index.js"
@@ -8,6 +8,9 @@
   "scripts": {
     "build": "tsup src/index.ts --format cjs --clean",
     "test": "echo 'No tests yet'"
+  },
+  "dependencies": {
+    "@majlis/shared": "*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -5,10 +5,9 @@ import {
   getSessionsSinceCompression,
   hasDoubts as dbHasDoubts,
   checkCircuitBreaker,
-  updateExperimentStatus,
   insertDeadEnd,
 } from '../db/queries.js';
-import { validNext, determineNextStep, isTerminal } from '../state/machine.js';
+import { validNext, determineNextStep, isTerminal, transitionAndPersist, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
 import { hasChallenges } from '../db/queries.js';
 import type { MajlisConfig, Experiment } from '../types.js';
@@ -72,7 +71,7 @@ async function runNextStep(
       `Circuit breaker tripped for ${exp.sub_type}`,
       `Sub-type ${exp.sub_type} exceeded ${config.cycle.circuit_breaker_threshold} failures`,
       exp.sub_type, 'procedural');
-    updateExperimentStatus(db, exp.id, 'dead_end');
+    adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'circuit_breaker');
     fmt.warn('Experiment dead-ended. Triggering Maqasid Check (purpose audit).');
     await audit([config.project?.objective ?? '']);
     return;
@@ -140,7 +139,7 @@ async function runAutoLoop(
         `Circuit breaker tripped for ${exp.sub_type}`,
         `Sub-type ${exp.sub_type} exceeded ${config.cycle.circuit_breaker_threshold} failures`,
         exp.sub_type, 'procedural');
-      updateExperimentStatus(db, exp.id, 'dead_end');
+      adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'circuit_breaker');
       await audit([config.project?.objective ?? '']);
       break;
     }
@@ -191,21 +190,27 @@ async function executeStep(
     case ExperimentStatus.COMPRESSED:
       await cycle('compress', []);
       // Compression is session-level but the experiment status needs advancing
-      updateExperimentStatus(getDb(root), exp.id, 'compressed');
+      transitionAndPersist(getDb(root), exp.id, exp.status as ExperimentStatus, ExperimentStatus.COMPRESSED);
       fmt.info(`Experiment ${exp.slug} compressed.`);
       break;
     case ExperimentStatus.GATED:
       await cycle('gate', expArgs);
       break;
-    case ExperimentStatus.REFRAMED:
+    case ExperimentStatus.REFRAMED: {
       // Reframing is session-level (already done before experiment creation).
       // Just advance the status so the next iteration picks up gating.
-      updateExperimentStatus(getDb(root), exp.id, 'reframed');
+      const currentStatus = exp.status as ExperimentStatus;
+      if (currentStatus === ExperimentStatus.CLASSIFIED) {
+        adminTransitionAndPersist(getDb(root), exp.id, currentStatus, ExperimentStatus.REFRAMED, 'bootstrap');
+      } else {
+        transitionAndPersist(getDb(root), exp.id, currentStatus, ExperimentStatus.REFRAMED);
+      }
       fmt.info(`Reframe acknowledged for ${exp.slug}. Proceeding to gate.`);
       break;
+    }
     case ExperimentStatus.MERGED:
       // Terminal: advance status (covers manual compress → next flow)
-      updateExperimentStatus(getDb(root), exp.id, 'merged');
+      transitionAndPersist(getDb(root), exp.id, exp.status as ExperimentStatus, ExperimentStatus.MERGED);
       fmt.success(`Experiment ${exp.slug} merged.`);
       break;
     case ExperimentStatus.DEAD_END:

@@ -3,7 +3,8 @@ import * as path from 'node:path';
 import type Database from 'better-sqlite3';
 import type { Experiment, Verification } from './types.js';
 import type { Grade } from './state/types.js';
-import { GRADE_ORDER } from './state/types.js';
+import { ExperimentStatus, GRADE_ORDER } from './state/types.js';
+import { transition } from './state/machine.js';
 import {
   getVerificationsByExperiment,
   getConfirmedDoubts,
@@ -14,7 +15,7 @@ import {
   insertVerification,
 } from './db/queries.js';
 import { spawnSynthesiser } from './agents/spawn.js';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { autoCommit } from './git.js';
 import * as fmt from './output/format.js';
 
@@ -24,10 +25,13 @@ import * as fmt from './output/format.js';
  * PRD v2 §4.5.
  */
 export function worstGrade(grades: Verification[]): Grade {
+  if (grades.length === 0) {
+    throw new Error('Cannot determine grade from empty verification set — this indicates a data integrity issue');
+  }
   for (const grade of GRADE_ORDER) {
     if (grades.some(g => g.grade === grade)) return grade;
   }
-  return 'sound'; // no grades = vacuously sound
+  return 'sound';
 }
 
 /**
@@ -50,10 +54,14 @@ export async function resolve(
 
   const overallGrade = worstGrade(grades);
 
+  // Mark as resolved first — all cases below hop from RESOLVED to a final state
+  updateExperimentStatus(db, exp.id, 'resolved');
+
   switch (overallGrade) {
     case 'sound': {
       // All components proven. Safe to merge.
       gitMerge(exp.branch, projectRoot);
+      transition(ExperimentStatus.RESOLVED, ExperimentStatus.MERGED);
       updateExperimentStatus(db, exp.id, 'merged');
       fmt.success(`Experiment ${exp.slug} MERGED (all sound).`);
       break;
@@ -68,6 +76,7 @@ export async function resolve(
         .join('\n');
       appendToFragilityMap(projectRoot, exp.slug, gaps);
       autoCommit(projectRoot, `resolve: fragility gaps from ${exp.slug}`);
+      transition(ExperimentStatus.RESOLVED, ExperimentStatus.MERGED);
       updateExperimentStatus(db, exp.id, 'merged');
       fmt.success(`Experiment ${exp.slug} MERGED (good, ${grades.filter(g => g.grade === 'good').length} gaps added to fragility map).`);
       break;
@@ -96,6 +105,7 @@ export async function resolve(
       }, projectRoot);
 
       const guidanceText = guidance.structured?.guidance ?? guidance.output;
+      transition(ExperimentStatus.RESOLVED, ExperimentStatus.BUILDING);
       db.transaction(() => {
         storeBuilderGuidance(db, exp.id, guidanceText);
         updateExperimentStatus(db, exp.id, 'building');
@@ -113,6 +123,7 @@ export async function resolve(
       const rejectedComponents = grades.filter(g => g.grade === 'rejected');
       const whyFailed = rejectedComponents.map(r => r.notes ?? 'rejected').join('; ');
 
+      transition(ExperimentStatus.RESOLVED, ExperimentStatus.DEAD_END);
       db.transaction(() => {
         insertDeadEnd(
           db,
@@ -155,8 +166,12 @@ export async function resolveDbOnly(
 
   const overallGrade = worstGrade(grades);
 
+  // Mark as resolved first — all cases below hop from RESOLVED to a final state
+  updateExperimentStatus(db, exp.id, 'resolved');
+
   switch (overallGrade) {
     case 'sound':
+      transition(ExperimentStatus.RESOLVED, ExperimentStatus.MERGED);
       updateExperimentStatus(db, exp.id, 'merged');
       fmt.success(`Experiment ${exp.slug} RESOLVED (sound) — git merge deferred.`);
       break;
@@ -167,6 +182,7 @@ export async function resolveDbOnly(
         .map(g => `- **${g.component}**: ${g.notes ?? 'minor gaps'}`)
         .join('\n');
       appendToFragilityMap(projectRoot, exp.slug, gaps);
+      transition(ExperimentStatus.RESOLVED, ExperimentStatus.MERGED);
       updateExperimentStatus(db, exp.id, 'merged');
       fmt.success(`Experiment ${exp.slug} RESOLVED (good) — git merge deferred.`);
       break;
@@ -189,6 +205,7 @@ export async function resolveDbOnly(
       }, projectRoot);
 
       const guidanceText = guidance.structured?.guidance ?? guidance.output;
+      transition(ExperimentStatus.RESOLVED, ExperimentStatus.BUILDING);
       db.transaction(() => {
         storeBuilderGuidance(db, exp.id, guidanceText);
         updateExperimentStatus(db, exp.id, 'building');
@@ -203,6 +220,7 @@ export async function resolveDbOnly(
     case 'rejected': {
       const rejectedComponents = grades.filter(g => g.grade === 'rejected');
       const whyFailed = rejectedComponents.map(r => r.notes ?? 'rejected').join('; ');
+      transition(ExperimentStatus.RESOLVED, ExperimentStatus.DEAD_END);
       db.transaction(() => {
         insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug, whyFailed,
           `Approach rejected: ${whyFailed}`, exp.sub_type, 'structural');
@@ -223,12 +241,20 @@ function gitMerge(branch: string, cwd: string): void {
   try {
     // Must be on main/master to merge the experiment branch into it.
     // Without this, `git merge exp/foo` while on exp/foo is a no-op.
-    execSync('git checkout main 2>/dev/null || git checkout master', {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    execSync(`git merge ${branch} --no-ff -m "Merge experiment branch ${branch}"`, {
+    try {
+      execFileSync('git', ['checkout', 'main'], {
+        cwd,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch {
+      execFileSync('git', ['checkout', 'master'], {
+        cwd,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+    execFileSync('git', ['merge', branch, '--no-ff', '-m', `Merge experiment branch ${branch}`], {
       cwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -243,7 +269,7 @@ function gitRevert(branch: string, cwd: string): void {
     // Don't delete the branch — just switch away from it.
     // Also discard uncommitted experiment changes so they don't
     // follow us back to main (e.g. if auto-commit failed).
-    const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', {
+    const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd,
       encoding: 'utf-8',
     }).trim();
@@ -251,13 +277,21 @@ function gitRevert(branch: string, cwd: string): void {
     if (currentBranch === branch) {
       // Discard tracked modifications from the experiment
       try {
-        execSync('git checkout -- .', { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+        execFileSync('git', ['checkout', '--', '.'], { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
       } catch { /* no uncommitted changes — fine */ }
-      execSync('git checkout main 2>/dev/null || git checkout master', {
-        cwd,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      try {
+        execFileSync('git', ['checkout', 'main'], {
+          cwd,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch {
+        execFileSync('git', ['checkout', 'master'], {
+          cwd,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      }
     }
   } catch {
     console.warn(`[majlis] Could not switch away from ${branch} — you may need to do this manually.`);

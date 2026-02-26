@@ -61,8 +61,8 @@ describe('worstGrade()', () => {
     assert.equal(worstGrade(grades), 'rejected');
   });
 
-  it('returns sound for empty grades array', () => {
-    assert.equal(worstGrade([]), 'sound');
+  it('throws for empty grades array', () => {
+    assert.throws(() => worstGrade([]), /Cannot determine grade from empty verification set/);
   });
 
   it('handles single grade', () => {

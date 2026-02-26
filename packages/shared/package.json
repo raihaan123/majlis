@@ -1,0 +1,19 @@
+{
+  "name": "@majlis/shared",
+  "version": "0.7.0",
+  "private": true,
+  "description": "Shared definitions for Majlis framework packages",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --clean --dts"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT"
+}

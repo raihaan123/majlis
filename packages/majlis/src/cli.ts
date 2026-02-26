@@ -96,6 +96,7 @@ async function main(): Promise<void> {
       case 'doubt':
       case 'scout':
       case 'verify':
+      case 'gate':
       case 'compress': {
         const { cycle } = await import('./commands/cycle.js');
         await cycle(command, rest);
@@ -190,6 +191,7 @@ Cycle:
   doubt [experiment]         Spawn critic agent
   scout [experiment]         Spawn scout agent
   verify [experiment]        Spawn verifier agent
+  gate [experiment]          Spawn gatekeeper agent
   resolve [experiment]       Route based on verification grades
   compress                   Spawn compressor agent
 
