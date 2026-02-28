@@ -15,6 +15,8 @@ Or add to an existing project:
 npx create-majlis --init
 ```
 
+**Before integrating into an existing project**, have Claude read [READINESS.md](READINESS.md) first. It's a step-by-step directive that walks Claude through preparing your project — setting up a metrics command, identifying fixtures and gates, writing CLAUDE.md, and configuring tracked metrics. This ensures `majlis status` shows all green on day one.
+
 ## What This Is
 
 Majlis is a multi-agent workflow framework for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), designed for problems where nobody has found the answer before — algorithm discovery, novel engineering, mathematical research. It gives AI agents distinct roles with enforced boundaries so that what gets built also gets challenged, verified, and compressed into durable knowledge.
