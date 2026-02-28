@@ -1,5 +1,7 @@
 # Majlis
 
+[![npm v0.8.1](https://img.shields.io/badge/npm-v0.8.1-blue)](https://www.npmjs.com/package/majlis)
+
 **Structured multi-agent problem solving through doubt, verification, and compressed knowledge.**
 
 Standard AI coding agents are great at boilerplate, but terrible at novel engineering. They get stuck in loops, hallucinate fixes that break other things, forget context over time, and confidently optimise the wrong objectives.
@@ -350,6 +352,8 @@ Orchestration:
 ## Philosophy
 
 Every hard problem is an act of seeking truth in a space no one has mapped. This framework draws from fifteen traditions of Islamic scholarship on how to manage complexity, verify truth, and make decisions under uncertainty. See [FOUNDATIONS.md](FOUNDATIONS.md) for the full intellectual lineage.
+
+The methodology is domain-agnostic — the state machine, evidence hierarchy, and structured doubt cycle apply to any rigorous research, not just code. See [VISION.md](VISION.md) for where this is heading.
 
 ## License
 

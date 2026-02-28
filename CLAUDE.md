@@ -41,7 +41,8 @@ npm test             # runs tests in both consumer packages
 - **Project readiness:** `majlis status` runs diagnostic checks on config, fixtures, metrics, and docs.
 - **Build verification gate:** If `config.build.pre_measure` is set, runs after builder finishes — broken code stays at 'building' with guidance for retry. Skips if unconfigured (Tradition 3: weak link invalidates chain).
 - **Builder abandon:** Builder can abandon a hypothesis it determines is structurally impossible, outputting `{ "abandon": { "reason": "...", "structural_constraint": "..." } }`. Records dead-end and skips the full cycle (Tradition 13: Ijtihad qualified judgment).
-- **Gatekeeper reject → dead-end:** Gate rejection now routes directly to DEAD_END with a 'procedural' category (doesn't block future approaches). No longer stays at 'gated' waiting for manual intervention (Tradition 10: Maqasid — procedure over purpose).
+- **Gate rejection pause:** Gatekeeper rejection stores the reason in `gate_rejection_reason` and the experiment stays at 'gated'. User can dispute with `majlis next --override-gate` or abandon with `majlis revert`. Autonomous mode (`majlis run`) auto-dead-ends since no human to dispute.
+- **Post-mortem agent:** `majlis revert` spawns a read-only opus agent that analyses the git diff, synthesis, and artifact files to produce structured dead-end constraints. Falls back to `--reason` text on failure.
 - **Experiment lineage:** Builder and verifier receive structured DB records for related experiments (same sub-type). Injected as canonical context alongside synthesis (Tradition 1: Hafiz, Tradition 14: Shura — genuine consultation).
 - **Output provenance tracking:** `extractStructuredData` returns `{ data, tier }` — tier 1 (JSON), 2 (regex), 3 (Haiku). Tier 3 triggers a provenance warning to the verifier (Tradition 3: chain provenance, Tradition 15: Tajwid distortion flagging).
 - **Extended write guards:** Builder and verifier are blocked from modifying `.claude/` and `.majlis/agents/` directories (Tradition 12: Adab al-Bahth — agents must not modify their own instructions).
@@ -62,11 +63,13 @@ npm test             # runs tests in both consumer packages
 ## Release Pattern
 ```bash
 # 1. Bump version in all three package.json files (majlis, create-majlis, shared)
-# 2. Commit with message format: "Majlis vX.Y.Z — brief description"
-# 3. Tag with: git tag vX.Y.Z
-# 4. Push commit and tag: git push && git push --tags
+# 2. Update the npm badge version in README.md (shields.io badge at top of file)
+# 3. Commit with message format: "Majlis vX.Y.Z — brief description"
+# 4. Tag with: git tag vX.Y.Z
+# 5. Push commit and tag: git push && git push --tags
 # CI on GitHub handles npm publish from the tag.
 ```
 - All three packages share the same version number.
 - `@majlis/shared` is `private: true` — CI skips it during publish.
 - Commit message convention: `Majlis vX.Y.Z — feature/fix summary`.
+- README badge uses `https://img.shields.io/badge/npm-vX.Y.Z-blue` linked to the npm package page.
