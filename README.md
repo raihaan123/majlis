@@ -2,7 +2,7 @@
 
 > **When being confidently wrong is more expensive than being slow.**
 
-[![npm v0.8.3](https://img.shields.io/badge/npm-v0.8.3-blue)](https://www.npmjs.com/package/majlis) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![npm v0.8.4](https://img.shields.io/badge/npm-v0.8.4-blue)](https://www.npmjs.com/package/majlis) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Standard AI coding agents are great at boilerplate, but terrible at novel engineering. They get stuck in loops, hallucinate fixes that break other things, forget context over time, and confidently optimise the wrong objectives.
 

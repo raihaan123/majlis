@@ -747,9 +747,15 @@ function gitCommitBuild(exp: Experiment, cwd: string): void {
       fmt.info('No code changes to commit.');
       return;
     }
-    const msg = `EXP-${String(exp.id).padStart(3, '0')}: ${exp.slug}\n\n${exp.hypothesis ?? ''}`;
+    // Determine iteration number from accumulated guidance headers
+    const guidance = exp.builder_guidance ?? '';
+    const iterationNums = guidance.match(/### Iteration (\d+)/g)
+      ?.map(m => parseInt(m.replace('### Iteration ', ''), 10)) ?? [];
+    const iterNum = iterationNums.length > 0 ? Math.max(...iterationNums) + 1 : 1;
+    const iterTag = iterNum > 1 ? ` [iter ${iterNum}]` : '';
+    const msg = `EXP-${String(exp.id).padStart(3, '0')}: ${exp.slug}${iterTag}\n\n${exp.hypothesis ?? ''}`;
     execFileSync('git', ['commit', '-m', msg], { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
-    fmt.info(`Committed builder changes on ${exp.branch}.`);
+    fmt.info(`Committed builder changes on ${exp.branch}${iterTag}.`);
   } catch {
     fmt.warn('Could not auto-commit builder changes — commit manually before resolving.');
   }
