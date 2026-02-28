@@ -112,17 +112,59 @@ Runs N experiments simultaneously in separate git worktrees. Each gets its own b
 
 ### The State Machine
 
-The CLI controls routing, not the LLM. Every experiment moves through a deterministic state machine:
-
-```
-CLASSIFY -> REFRAME -> GATE -> BUILD -> CHALLENGE -> DOUBT -> SCOUT -> VERIFY -> RESOLVE -> COMPRESS
-```
-
-Two transition paths enforce this:
+The CLI controls routing, not the LLM. Every experiment moves through a deterministic state machine. Two transition paths enforce this:
 - `transition()` — normal flow, validated against the TRANSITIONS map
 - `adminTransition()` — operational moves (revert, circuit breaker, error recovery)
 
 No agent can skip a step or jump ahead. The state machine is the adab (rules of engagement).
+
+```mermaid
+stateDiagram-v2
+    direction LR
+
+    [*] --> classified
+    classified --> reframed
+    classified --> gated
+    reframed --> gated
+
+    gated --> building
+    gated --> gated : reject hypothesis
+
+    building --> built
+    building --> building : truncation retry
+
+    built --> doubted
+    built --> challenged
+
+    doubted --> challenged
+    doubted --> scouted
+    doubted --> verifying
+    challenged --> doubted
+    challenged --> verifying
+    scouted --> verifying
+
+    verifying --> verified
+    verified --> resolved
+
+    resolved --> compressed : sound / good
+    resolved --> building : weak (cycle back)
+    resolved --> merged : sound (direct)
+    resolved --> dead_end : rejected
+
+    compressed --> merged
+    compressed --> building : weak (cycle back)
+
+    merged --> [*]
+    dead_end --> [*]
+
+    state "Any non-terminal" as admin
+    note right of dead_end
+        Admin transitions (revert,
+        circuit breaker, error recovery)
+        can reach dead_end from any
+        non-terminal state
+    end note
+```
 
 ### The Roles
 
