@@ -14,6 +14,8 @@ function makeExp(overrides: Partial<Experiment> = {}): Experiment {
     sub_type: null,
     hypothesis: 'Test hypothesis',
     builder_guidance: null,
+    depends_on: null,
+    context_files: null,
     created_at: '2024-01-01',
     updated_at: '2024-01-01',
     ...overrides,

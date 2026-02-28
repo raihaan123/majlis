@@ -63,9 +63,9 @@ describe('Migrations', () => {
     ]);
   });
 
-  it('sets user_version to 5', () => {
+  it('sets user_version to 6', () => {
     const version = db.pragma('user_version', { simple: true });
-    assert.equal(version, 5);
+    assert.equal(version, 6);
   });
 
   it('has builder_guidance column on experiments', () => {
@@ -74,10 +74,17 @@ describe('Migrations', () => {
     assert.ok(colNames.includes('builder_guidance'));
   });
 
+  it('has depends_on and context_files columns on experiments', () => {
+    const cols = db.prepare('PRAGMA table_info(experiments)').all() as Array<{ name: string }>;
+    const colNames = cols.map(c => c.name);
+    assert.ok(colNames.includes('depends_on'));
+    assert.ok(colNames.includes('context_files'));
+  });
+
   it('is idempotent', () => {
     const db2 = openTestDb();
     const version = db2.pragma('user_version', { simple: true });
-    assert.equal(version, 5);
+    assert.equal(version, 6);
   });
 });
 

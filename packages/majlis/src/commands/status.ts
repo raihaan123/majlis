@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { execSync } from 'node:child_process';
 import { getDb, findProjectRoot } from '../db/connection.js';
 import {
   listActiveExperiments,
@@ -8,6 +11,7 @@ import {
 } from '../db/queries.js';
 import type { MajlisConfig } from '../types.js';
 import { loadConfig } from '../config.js';
+import { validateProject, formatValidation } from '@majlis/shared';
 import * as fmt from '../output/format.js';
 
 export async function status(isJson: boolean): Promise<void> {
@@ -95,6 +99,37 @@ export async function status(isJson: boolean): Promise<void> {
   // Judgment decisions
   if (judgmentDecisions.length > 0) {
     console.log(`\n  ${fmt.yellow(`${judgmentDecisions.length} judgment-level decisions`)} (provisional targets for doubt)`);
+  }
+
+  // Project readiness validation
+  console.log();
+  fmt.header('Project Readiness');
+  const validation = validateProject({
+    hasGitRepo: fs.existsSync(path.join(root, '.git')),
+    hasClaudeMd: fs.existsSync(path.join(root, 'CLAUDE.md')),
+    metricsCommand: config.metrics.command,
+    metricsCommandRunnable: checkCommandRunnable(config.metrics.command, root),
+    fixtures: config.metrics.fixtures,
+    tracked: config.metrics.tracked,
+    preMeasure: config.build.pre_measure,
+    hasObjective: !!(config.project.objective && config.project.objective.length > 0),
+    hasSynthesis: (() => {
+      const sp = path.join(root, 'docs', 'synthesis', 'current.md');
+      if (!fs.existsSync(sp)) return false;
+      const content = fs.readFileSync(sp, 'utf-8');
+      return content.length > 100 && !content.includes('No experiments yet');
+    })(),
+  });
+  console.log(formatValidation(validation));
+}
+
+function checkCommandRunnable(command: string, cwd: string): boolean {
+  if (!command || command.includes('echo \'{"fixtures":{}}\'')) return false;
+  try {
+    execSync(command, { cwd, encoding: 'utf-8', timeout: 15_000, stdio: ['pipe', 'pipe', 'pipe'] });
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type Database from 'better-sqlite3';
-import type { Experiment, Verification } from './types.js';
+import type { Experiment, Verification, MajlisConfig } from './types.js';
 import type { Grade } from './state/types.js';
 import { ExperimentStatus, GRADE_ORDER } from './state/types.js';
 import { transition } from './state/machine.js';
@@ -14,6 +14,8 @@ import {
   insertDeadEnd,
   insertVerification,
 } from './db/queries.js';
+import { compareMetrics, checkGateViolations } from './metrics.js';
+import { loadConfig } from './config.js';
 import { spawnSynthesiser } from './agents/spawn.js';
 import { execSync, execFileSync } from 'node:child_process';
 import { autoCommit } from './git.js';
@@ -53,6 +55,34 @@ export async function resolve(
   }
 
   const overallGrade = worstGrade(grades);
+
+  // Gate violation check — a single regression on a gate fixture blocks merge
+  // regardless of verification grades. Tradition 3 (Hadith): one weak link
+  // invalidates the chain. Tradition 10 (Maqasid): gate fixtures are daruriyyat.
+  const config = loadConfig(projectRoot);
+  const metricComparisons = compareMetrics(db, exp.id, config);
+  const gateViolations = checkGateViolations(metricComparisons);
+
+  if (gateViolations.length > 0 && (overallGrade === 'sound' || overallGrade === 'good')) {
+    fmt.warn('Gate fixture regression detected — blocking merge:');
+    for (const v of gateViolations) {
+      fmt.warn(`  ${v.fixture} / ${v.metric}: ${v.before} → ${v.after} (${v.delta > 0 ? '+' : ''}${v.delta})`);
+    }
+    // Downgrade to weak — cycle back with guidance about the gate violation
+    updateExperimentStatus(db, exp.id, 'resolved');
+    const guidanceText = `Gate fixture regression blocks merge. Fix these regressions before re-attempting:\n` +
+      gateViolations.map(v => `- ${v.fixture} / ${v.metric}: was ${v.before}, now ${v.after}`).join('\n');
+    transition(ExperimentStatus.RESOLVED, ExperimentStatus.BUILDING);
+    db.transaction(() => {
+      storeBuilderGuidance(db, exp.id, guidanceText);
+      updateExperimentStatus(db, exp.id, 'building');
+      if (exp.sub_type) {
+        incrementSubTypeFailure(db, exp.sub_type, exp.id, 'weak');
+      }
+    })();
+    fmt.warn(`Experiment ${exp.slug} CYCLING BACK — gate fixture(s) regressed.`);
+    return;
+  }
 
   // Mark as resolved first — all cases below hop from RESOLVED to a final state
   updateExperimentStatus(db, exp.id, 'resolved');
@@ -165,6 +195,32 @@ export async function resolveDbOnly(
   }
 
   const overallGrade = worstGrade(grades);
+
+  // Gate violation check (same as resolve() — DRY would be nice but
+  // resolveDbOnly is intentionally a separate path for swarm)
+  const config = loadConfig(projectRoot);
+  const metricComparisons = compareMetrics(db, exp.id, config);
+  const gateViolations = checkGateViolations(metricComparisons);
+
+  if (gateViolations.length > 0 && (overallGrade === 'sound' || overallGrade === 'good')) {
+    fmt.warn('Gate fixture regression detected — blocking merge:');
+    for (const v of gateViolations) {
+      fmt.warn(`  ${v.fixture} / ${v.metric}: ${v.before} → ${v.after} (${v.delta > 0 ? '+' : ''}${v.delta})`);
+    }
+    updateExperimentStatus(db, exp.id, 'resolved');
+    const guidanceText = `Gate fixture regression blocks merge. Fix these regressions before re-attempting:\n` +
+      gateViolations.map(v => `- ${v.fixture} / ${v.metric}: was ${v.before}, now ${v.after}`).join('\n');
+    transition(ExperimentStatus.RESOLVED, ExperimentStatus.BUILDING);
+    db.transaction(() => {
+      storeBuilderGuidance(db, exp.id, guidanceText);
+      updateExperimentStatus(db, exp.id, 'building');
+      if (exp.sub_type) {
+        incrementSubTypeFailure(db, exp.sub_type, exp.id, 'weak');
+      }
+    })();
+    fmt.warn(`Experiment ${exp.slug} CYCLING BACK — gate fixture(s) regressed.`);
+    return 'weak' as Grade;
+  }
 
   // Mark as resolved first — all cases below hop from RESOLVED to a final state
   updateExperimentStatus(db, exp.id, 'resolved');

@@ -18,13 +18,24 @@ export function createExperiment(
   hypothesis: string | null,
   subType: string | null,
   classificationRef: string | null,
+  dependsOn: string | null = null,
+  contextFiles: string[] | null = null,
 ): Experiment {
   const stmt = db.prepare(`
-    INSERT INTO experiments (slug, branch, hypothesis, sub_type, classification_ref, status)
-    VALUES (?, ?, ?, ?, ?, 'classified')
+    INSERT INTO experiments (slug, branch, hypothesis, sub_type, classification_ref, status, depends_on, context_files)
+    VALUES (?, ?, ?, ?, ?, 'classified', ?, ?)
   `);
-  const result = stmt.run(slug, branch, hypothesis, subType, classificationRef);
+  const contextJson = contextFiles && contextFiles.length > 0 ? JSON.stringify(contextFiles) : null;
+  const result = stmt.run(slug, branch, hypothesis, subType, classificationRef, dependsOn, contextJson);
   return getExperimentById(db, result.lastInsertRowid as number)!;
+}
+
+/**
+ * Check if an experiment's dependency is satisfied (merged).
+ * Returns null if no dependency, the dependency experiment otherwise.
+ */
+export function checkDependency(db: Database.Database, dependsOnSlug: string): Experiment | null {
+  return getExperimentBySlug(db, dependsOnSlug);
 }
 
 export function getExperimentById(db: Database.Database, id: number): Experiment | null {

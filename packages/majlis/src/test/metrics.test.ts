@@ -2,7 +2,7 @@ import { describe, it, beforeEach } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { openTestDb } from '../db/connection.js';
 import { createExperiment, insertMetric } from '../db/queries.js';
-import { compareMetrics, parseMetricsOutput } from '../metrics.js';
+import { compareMetrics, parseMetricsOutput, isGateFixture, checkGateViolations } from '../metrics.js';
 import type { MajlisConfig } from '../types.js';
 import type Database from 'better-sqlite3';
 
@@ -10,7 +10,10 @@ const testConfig: MajlisConfig = {
   project: { name: 'test', description: 'test', objective: 'test' },
   metrics: {
     command: 'echo test',
-    fixtures: ['ubracket', 'sig1'],
+    fixtures: {
+      ubracket: { gate: true },
+      sig1: { gate: false },
+    },
     tracked: {
       free_edges: { direction: 'lower_is_better', target: 0 },
       volume_error: { direction: 'lower_is_better', target: 0.001 },
@@ -96,6 +99,53 @@ describe('compareMetrics()', () => {
     // No 'after' metric
     const comparisons = compareMetrics(db, exp.id, testConfig);
     assert.equal(comparisons.length, 0);
+  });
+
+  it('marks gate fixtures in comparisons', () => {
+    const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
+    insertMetric(db, exp.id, 'before', 'ubracket', 'free_edges', 0);
+    insertMetric(db, exp.id, 'after', 'ubracket', 'free_edges', 3);
+    insertMetric(db, exp.id, 'before', 'sig1', 'free_edges', 25);
+    insertMetric(db, exp.id, 'after', 'sig1', 'free_edges', 20);
+
+    const comparisons = compareMetrics(db, exp.id, testConfig);
+    const ubracket = comparisons.find(c => c.fixture === 'ubracket' && c.metric === 'free_edges');
+    const sig1 = comparisons.find(c => c.fixture === 'sig1' && c.metric === 'free_edges');
+    assert.equal(ubracket?.gate, true);
+    assert.equal(sig1?.gate, false);
+  });
+
+  it('detects gate violations', () => {
+    const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
+    insertMetric(db, exp.id, 'before', 'ubracket', 'free_edges', 0);
+    insertMetric(db, exp.id, 'after', 'ubracket', 'free_edges', 5);  // regression on gate
+    insertMetric(db, exp.id, 'before', 'sig1', 'free_edges', 25);
+    insertMetric(db, exp.id, 'after', 'sig1', 'free_edges', 20);     // improvement on non-gate
+
+    const comparisons = compareMetrics(db, exp.id, testConfig);
+    const violations = checkGateViolations(comparisons);
+    assert.equal(violations.length, 1);
+    assert.equal(violations[0].fixture, 'ubracket');
+    assert.equal(violations[0].regression, true);
+    assert.equal(violations[0].gate, true);
+  });
+});
+
+describe('isGateFixture()', () => {
+  it('returns true for gate fixtures', () => {
+    assert.equal(isGateFixture({ baseline: { gate: true }, target: {} }, 'baseline'), true);
+  });
+
+  it('returns false for non-gate fixtures', () => {
+    assert.equal(isGateFixture({ baseline: { gate: true }, target: {} }, 'target'), false);
+  });
+
+  it('returns false for legacy array format', () => {
+    assert.equal(isGateFixture(['baseline', 'target'], 'baseline'), false);
+  });
+
+  it('returns false for unknown fixtures', () => {
+    assert.equal(isGateFixture({ baseline: { gate: true } }, 'unknown'), false);
   });
 });
 

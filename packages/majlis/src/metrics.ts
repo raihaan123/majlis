@@ -3,6 +3,15 @@ import type { MetricComparison, MetricSnapshot, MajlisConfig } from './types.js'
 import { getMetricsByExperimentAndPhase } from './db/queries.js';
 
 /**
+ * Resolve whether a fixture is a regression gate.
+ * Handles both legacy format (string[]) and new format (Record<string, FixtureConfig>).
+ */
+export function isGateFixture(fixtures: MajlisConfig['metrics']['fixtures'], fixtureName: string): boolean {
+  if (Array.isArray(fixtures)) return false;  // Legacy format — no gates
+  return fixtures[fixtureName]?.gate === true;
+}
+
+/**
  * Compare before/after metrics for an experiment.
  * Deterministic — no LLM needed. PRD v2 §4.7.
  */
@@ -36,12 +45,22 @@ export function compareMetrics(
           after: a.metric_value,
           delta: a.metric_value - b.metric_value,
           regression,
+          gate: isGateFixture(config.metrics.fixtures, fixture),
         });
       }
     }
   }
 
   return comparisons;
+}
+
+/**
+ * Check for gate violations — regressions on gate fixtures.
+ * Returns the list of violated gate comparisons.
+ * A single gate violation blocks merge (Tradition 3: jarh wa ta'dil).
+ */
+export function checkGateViolations(comparisons: MetricComparison[]): MetricComparison[] {
+  return comparisons.filter(c => c.gate && c.regression);
 }
 
 function isRegression(before: number, after: number, direction: string, target?: number): boolean {

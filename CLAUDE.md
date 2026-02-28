@@ -33,6 +33,13 @@ npm test             # runs tests in both consumer packages
 - **Shell commands use `execFileSync`** (not `execSync`) — no shell interpolation, arguments passed as arrays.
 - **Shared package is bundled, not external.** Both consumer tsup configs inline `@majlis/shared` into their dist bundles. The shared package is `private: true` and never published.
 
+## Experiment Features
+- **Regression gates:** `config.metrics.fixtures` is a `Record<string, { gate?: boolean }>`. Gate fixtures block merge on regression regardless of verification grades (Tradition 3: jarh wa ta'dil).
+- **Experiment dependencies:** `majlis new --depends-on SLUG` blocks building until the dependency is merged (Tradition 4: Al-Khwarizmi's ordering).
+- **Scoped context:** `majlis new --context file1,file2` injects domain-specific docs into agent prompts (Tradition 13: Ijtihad prerequisite mastery).
+- **Structured metric comparison:** Verifier receives typed `MetricComparison[]` with regression flags and gate markers (Tradition 15: Tajwid precision).
+- **Project readiness:** `majlis status` runs diagnostic checks on config, fixtures, metrics, and docs.
+
 ## Canonical Reference
 - PRD: See `FOUNDATIONS.md` for intellectual principles.
 - PRD v2: The authoritative specification is the plan document.

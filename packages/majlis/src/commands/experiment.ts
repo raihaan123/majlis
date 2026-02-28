@@ -55,9 +55,24 @@ export async function newExperiment(args: string[]): Promise<void> {
 
   // Parse optional flags (bounds-checked)
   const subType = getFlagValue(args, '--sub-type') ?? null;
+  const dependsOn = getFlagValue(args, '--depends-on') ?? null;
+  const contextArg = getFlagValue(args, '--context') ?? null;
+  const contextFiles = contextArg ? contextArg.split(',').map(f => f.trim()) : null;
+
+  // Validate dependency exists if specified
+  if (dependsOn) {
+    const depExp = getExperimentBySlug(db, dependsOn);
+    if (!depExp) {
+      throw new Error(`Dependency experiment not found: ${dependsOn}`);
+    }
+    fmt.info(`Depends on: ${dependsOn} (status: ${depExp.status})`);
+  }
 
   // Create DB entry
-  const exp = createExperiment(db, slug, branch, hypothesis, subType, null);
+  const exp = createExperiment(db, slug, branch, hypothesis, subType, null, dependsOn, contextFiles);
+  if (contextFiles) {
+    fmt.info(`Context files: ${contextFiles.join(', ')}`);
+  }
   fmt.success(`Created experiment #${exp.id}: ${exp.slug}`);
 
   // Create experiment log from template

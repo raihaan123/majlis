@@ -15,7 +15,7 @@ export const DEFAULT_CONFIG = {
   },
   metrics: {
     command: 'echo \'{"fixtures":{}}\'',
-    fixtures: [],
+    fixtures: {} as Record<string, { gate?: boolean }>,
     tracked: {},
   },
   build: {
@@ -50,7 +50,7 @@ export function configTemplate(answers: ConfigTemplateAnswers): string {
     },
     metrics: {
       command: answers.metricsCommand,
-      fixtures: [],
+      fixtures: {},
       tracked: {},
     },
     build: {

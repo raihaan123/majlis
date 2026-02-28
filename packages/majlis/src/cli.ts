@@ -179,6 +179,9 @@ Lifecycle:
 
 Experiments:
   new "hypothesis"           Create experiment, branch, log, DB entry
+    --sub-type TYPE          Classify by problem sub-type
+    --depends-on SLUG        Block building until dependency is merged
+    --context FILE,FILE      Inject domain-specific docs into agent context
   baseline                   Capture metrics snapshot (before)
   measure                    Capture metrics snapshot (after)
   compare [--json]           Compare before/after, detect regressions

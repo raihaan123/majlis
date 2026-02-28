@@ -35,7 +35,7 @@ import { resolve as resolveExperiment } from '../resolve.js';
 import type { Experiment, Doubt } from '../types.js';
 import type { StructuredOutput } from '../agents/types.js';
 import { loadConfig, readFileOrEmpty, truncateContext, CONTEXT_LIMITS } from '../config.js';
-import { parseMetricsOutput } from '../metrics.js';
+import { parseMetricsOutput, compareMetrics } from '../metrics.js';
 import { autoCommit } from '../git.js';
 import * as fmt from '../output/format.js';
 
@@ -169,6 +169,18 @@ async function doGate(db: ReturnType<typeof getDb>, exp: Experiment, root: strin
 }
 
 async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: string): Promise<void> {
+  // Validate dependency — if this experiment depends on another, it must be merged first
+  // Tradition 4 (Al-Khwarizmi): canonical forms have a natural ordering
+  if (exp.depends_on) {
+    const dep = getExperimentBySlug(db, exp.depends_on);
+    if (!dep || dep.status !== 'merged') {
+      throw new Error(
+        `Experiment "${exp.slug}" depends on "${exp.depends_on}" which is ${dep ? dep.status : 'not found'}. ` +
+        `Dependency must be merged before building.`
+      );
+    }
+  }
+
   // Validate transition
   transition(exp.status as ExperimentStatus, ExperimentStatus.BUILDING);
 
@@ -216,6 +228,9 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
 
   taskPrompt += '\n\nNote: The framework captures metrics automatically. Do NOT claim specific numbers unless quoting framework output.';
 
+  // Load experiment-scoped context files (Tradition 13: Ijtihad)
+  const supplementaryContext = loadExperimentContext(exp, root);
+
   const result = await spawnAgent('builder', {
     experiment: {
       id: exp.id,
@@ -233,6 +248,7 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
     fragility,
     synthesis,
     confirmedDoubts,
+    supplementaryContext: supplementaryContext || undefined,
     taskPrompt,
   }, root);
 
@@ -427,21 +443,40 @@ async function doVerify(db: ReturnType<typeof getDb>, exp: Experiment, root: str
   }
 
   // Framework-captured metrics — GROUND TRUTH, not self-reported by builder
-  const beforeMetrics = getMetricsByExperimentAndPhase(db, exp.id, 'before');
-  const afterMetrics = getMetricsByExperimentAndPhase(db, exp.id, 'after');
+  // Tradition 15 (Tajwid): pass structured comparison, not raw numbers, to prevent
+  // distortion in inter-agent handoffs
+  const config = loadConfig(root);
+  const metricComparisons = compareMetrics(db, exp.id, config);
+
   let metricsSection = '';
-  if (beforeMetrics.length > 0 || afterMetrics.length > 0) {
+  if (metricComparisons.length > 0) {
     metricsSection = '\n\n## Framework-Captured Metrics (GROUND TRUTH — not self-reported by builder)\n';
-    if (beforeMetrics.length > 0) {
-      metricsSection += '### Before Build\n';
-      for (const m of beforeMetrics) {
-        metricsSection += `- ${m.fixture} / ${m.metric_name}: ${m.metric_value}\n`;
-      }
+    metricsSection += '| Fixture | Metric | Before | After | Delta | Regression | Gate |\n';
+    metricsSection += '|---------|--------|--------|-------|-------|------------|------|\n';
+    for (const c of metricComparisons) {
+      metricsSection += `| ${c.fixture} | ${c.metric} | ${c.before} | ${c.after} | ${c.delta > 0 ? '+' : ''}${c.delta} | ${c.regression ? 'YES' : 'no'} | ${c.gate ? 'GATE' : '-'} |\n`;
     }
-    if (afterMetrics.length > 0) {
-      metricsSection += '### After Build\n';
-      for (const m of afterMetrics) {
-        metricsSection += `- ${m.fixture} / ${m.metric_name}: ${m.metric_value}\n`;
+    const gateViolations = metricComparisons.filter(c => c.gate && c.regression);
+    if (gateViolations.length > 0) {
+      metricsSection += `\n**GATE VIOLATION**: ${gateViolations.length} gate fixture(s) regressed. This MUST be addressed — gate regressions block merge.\n`;
+    }
+  } else {
+    // Fallback to raw before/after if no tracked metrics configured
+    const beforeMetrics = getMetricsByExperimentAndPhase(db, exp.id, 'before');
+    const afterMetrics = getMetricsByExperimentAndPhase(db, exp.id, 'after');
+    if (beforeMetrics.length > 0 || afterMetrics.length > 0) {
+      metricsSection = '\n\n## Framework-Captured Metrics (GROUND TRUTH — not self-reported by builder)\n';
+      if (beforeMetrics.length > 0) {
+        metricsSection += '### Before Build\n';
+        for (const m of beforeMetrics) {
+          metricsSection += `- ${m.fixture} / ${m.metric_name}: ${m.metric_value}\n`;
+        }
+      }
+      if (afterMetrics.length > 0) {
+        metricsSection += '### After Build\n';
+        for (const m of afterMetrics) {
+          metricsSection += `- ${m.fixture} / ${m.metric_name}: ${m.metric_value}\n`;
+        }
       }
     }
   }
@@ -458,6 +493,9 @@ async function doVerify(db: ReturnType<typeof getDb>, exp: Experiment, root: str
 
   updateExperimentStatus(db, exp.id, 'verifying');
 
+  // Load experiment-scoped context for verifier (Tradition 13: Ijtihad)
+  const verifierSupplementaryContext = loadExperimentContext(exp, root);
+
   const result = await spawnAgent('verifier', {
     experiment: {
       id: exp.id,
@@ -469,6 +507,8 @@ async function doVerify(db: ReturnType<typeof getDb>, exp: Experiment, root: str
     },
     doubts,
     challenges,
+    metricComparisons: metricComparisons.length > 0 ? metricComparisons : undefined,
+    supplementaryContext: verifierSupplementaryContext || undefined,
     taskPrompt:
       `Verify experiment ${exp.slug}: ${exp.hypothesis}. Check provenance and content. ` +
       `Test the ${doubts.length} doubt(s) and any adversarial challenges.` +
@@ -559,6 +599,34 @@ function gitCommitBuild(exp: Experiment, cwd: string): void {
   } catch {
     fmt.warn('Could not auto-commit builder changes — commit manually before resolving.');
   }
+}
+
+/**
+ * Load experiment-scoped context files.
+ * Tradition 13 (Ijtihad): the mujtahid must have mastery of relevant sources.
+ * Returns concatenated content with file headers, or empty string if none.
+ */
+function loadExperimentContext(exp: Experiment, root: string): string {
+  if (!exp.context_files) return '';
+  let files: string[];
+  try {
+    files = JSON.parse(exp.context_files);
+  } catch {
+    return '';
+  }
+  if (!Array.isArray(files) || files.length === 0) return '';
+
+  const sections: string[] = ['## Experiment-Scoped Reference Material'];
+  for (const relPath of files) {
+    const absPath = path.join(root, relPath);
+    try {
+      const content = fs.readFileSync(absPath, 'utf-8');
+      sections.push(`### ${relPath}\n\`\`\`\n${content.slice(0, 8000)}\n\`\`\``);
+    } catch {
+      sections.push(`### ${relPath}\n*(file not found)*`);
+    }
+  }
+  return sections.join('\n\n');
 }
 
 function resolveExperimentArg(db: ReturnType<typeof getDb>, args: string[]): Experiment {

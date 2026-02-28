@@ -197,6 +197,14 @@ const migrations: Migration[] = [
       CREATE INDEX idx_swarm_members_run ON swarm_members(swarm_run_id);
     `);
   },
+
+  // Migration 006: v5 → v6 — Experiment dependencies and scoped context
+  (db) => {
+    db.exec(`
+      ALTER TABLE experiments ADD COLUMN depends_on TEXT;
+      ALTER TABLE experiments ADD COLUMN context_files TEXT;
+    `);
+  },
 ];
 
 /**

@@ -25,41 +25,49 @@ Majlis is a multi-agent workflow framework for [Claude Code](https://docs.anthro
 
 ## Architecture
 
+Three packages in a monorepo:
+
+- `packages/majlis` — The CLI. Deterministic state machine, SQLite persistence, agent spawning.
+- `packages/create-majlis` — NPX scaffolder that bootstraps Majlis into a project.
+- `packages/shared` — Internal package (`@majlis/shared`). Agent definitions, templates, config defaults, validation. Bundled into both consumer packages via tsup.
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 3: LLM Agents                      │
-│  builder(opus) · critic(opus) · adversary(opus)             │
-│  verifier(opus) · reframer(opus) · compressor(opus)         │
-│  scout(opus)                                                │
-│                                                             │
-│  Creative work. Judgment calls. The scholarship.            │
-├─────────────────────────────────────────────────────────────┤
-│                    LAYER 2: majlis CLI                       │
-│  State machine · Cycle enforcement · Circuit breakers        │
-│  Agent spawning · Metric comparison · Regression detection   │
-│                                                             │
-│  Deterministic. TypeScript. The adab (rules of engagement). │
-├─────────────────────────────────────────────────────────────┤
-│                    LAYER 1: SQLite + Git                     │
-│  Experiment state · Evidence tags · Metrics history          │
-│  Dead-end registry · Fragility map · Session log            │
-│                                                             │
-│  Persistent. Queryable. The institutional memory.           │
-└─────────────────────────────────────────────────────────────┘
++---------------------------------------------------------+
+|                  LAYER 3: LLM Agents                    |
+| builder(opus) . critic(opus) . adversary(opus)          |
+| verifier(opus) . reframer(opus) . compressor(opus)      |
+| scout(opus) . gatekeeper(sonnet)                        |
+|                                                         |
+| Creative work. Judgment calls. The scholarship.         |
++---------------------------------------------------------+
+|                  LAYER 2: majlis CLI                     |
+| State machine . Cycle enforcement . Circuit breakers    |
+| Agent spawning . Metric comparison . Regression gates   |
+| Experiment dependencies . Scoped context injection      |
+|                                                         |
+| Deterministic. TypeScript. The adab (rules).            |
++---------------------------------------------------------+
+|                  LAYER 1: SQLite + Git                   |
+| Experiment state . Evidence tags . Metrics history      |
+| Dead-end registry . Fragility map . Session log         |
+|                                                         |
+| Persistent. Queryable. The institutional memory.        |
++---------------------------------------------------------+
 ```
 
 ## The Cycle
 
 ```
-1. CLASSIFY   → Taxonomy before solution (Al-Khwarizmi)
-2. REFRAME    → Independent decomposition (Al-Biruni)
-3. BUILD      → Write code with tagged decisions (Ijtihad)
-4. CHALLENGE  → Construct breaking inputs (Ibn al-Haytham)
-5. DOUBT      → Systematic challenge with evidence (Shukuk)
-6. SCOUT      → External search for alternatives (Rihla)
-7. VERIFY     → Provenance + content checks (Isnad + Matn)
-8. RESOLVE    → Route based on grades
-9. COMPRESS   → Shorter and denser (Hifz)
+ 1. CLASSIFY   -> Taxonomy before solution (Al-Khwarizmi)
+ 2. REFRAME    -> Independent decomposition (Al-Biruni)
+ 3. GATE       -> Hypothesis quality check
+ 4. BUILD      -> Write code with tagged decisions (Ijtihad)
+ 5. CHALLENGE  -> Construct breaking inputs (Ibn al-Haytham)
+ 6. DOUBT      -> Systematic challenge with evidence (Shukuk)
+ 7. SCOUT      -> External search for alternatives (Rihla)
+ 8. VERIFY     -> Provenance + content checks (Isnad + Matn)
+ 9. RESOLVE    -> Route based on grades
+10. COMPRESS   -> Shorter and denser (Hifz)
 ```
 
 ## Evidence Hierarchy
@@ -86,41 +94,74 @@ Every decision is tagged with its justification level. Stored as database column
 | **Reframer** | Independently decomposes from scratch (never sees builder code) | opus |
 | **Compressor** | Compresses, cross-references, maintains dead-end registry | opus |
 | **Scout** | Searches externally for alternative approaches | opus |
+| **Gatekeeper** | Fast hypothesis quality check before building | sonnet |
 
 ## Commands
 
-| Action | Command |
-|--------|---------|
-| Initialize | `majlis init` |
-| Status | `majlis status` |
-| New experiment | `majlis new "hypothesis"` |
-| Baseline metrics | `majlis baseline` |
-| Next step | `majlis next` |
-| Auto cycle | `majlis next --auto` |
-| Build | `majlis build [experiment]` |
-| Challenge | `majlis challenge [experiment]` |
-| Doubt | `majlis doubt [experiment]` |
-| Scout | `majlis scout [experiment]` |
-| Verify | `majlis verify [experiment]` |
-| Resolve | `majlis resolve [experiment]` |
-| Compress | `majlis compress` |
-| Classify | `majlis classify "domain"` |
-| Reframe | `majlis reframe [classification]` |
-| Audit | `majlis audit "objective"` |
-| Session start | `majlis session start "intent"` |
-| Session end | `majlis session end` |
-| Decisions | `majlis decisions [--level L]` |
-| Dead-ends | `majlis dead-ends [--sub-type S]` |
-| Autonomous | `majlis run "goal"` |
+```
+Lifecycle:
+  init [--scan]              Initialize Majlis in current project
+  scan [--force]             Scan codebase to auto-detect config + write synthesis
+  resync [--check] [--force] Update stale synthesis after project evolution
+  upgrade                    Sync agents, commands, hooks from CLI version
+  status [--json]            Show experiment states, cycle position, readiness
+
+Experiments:
+  new "hypothesis"           Create experiment, branch, log, DB entry
+    --sub-type TYPE          Classify by problem sub-type
+    --depends-on SLUG        Block building until dependency is merged
+    --context FILE,FILE      Inject domain-specific docs into agent context
+  baseline                   Capture metrics snapshot (before)
+  measure                    Capture metrics snapshot (after)
+  compare [--json]           Compare before/after, detect regressions
+  revert                     Revert experiment, log to dead-end
+
+Cycle:
+  next [experiment] [--auto] Determine and execute next cycle step
+  build [experiment]         Spawn builder agent
+  challenge [experiment]     Spawn adversary agent
+  doubt [experiment]         Spawn critic agent
+  scout [experiment]         Spawn scout agent
+  verify [experiment]        Spawn verifier agent
+  gate [experiment]          Spawn gatekeeper agent
+  resolve [experiment]       Route based on verification grades
+  compress                   Spawn compressor agent
+
+Classification:
+  classify "domain"          Classify problem space into sub-types
+  reframe [classification]   Independent decomposition
+
+Queries:
+  decisions [--level L]      List decisions by evidence level
+  dead-ends [--sub-type S]   Dead-ends with structural constraints
+  fragility                  Show fragility map
+  history [fixture]          Metric history for a fixture
+  circuit-breakers           Sub-type failure counts
+  check-commit               Exit non-zero if unverified experiments
+
+Audit:
+  audit "objective"          Maqasid check -- is the frame right?
+  diagnose ["focus area"]    Deep diagnosis -- root causes, patterns, gaps
+
+Sessions:
+  session start "intent"     Declare session intent
+  session end                Log accomplished/unfinished/fragility
+
+Orchestration:
+  run "goal"                 Autonomous orchestration until goal met
+  swarm "goal" [--parallel N] Run N experiments in parallel worktrees
+```
 
 ## Resolution
 
-- **Sound** → Merge
-- **Good** → Merge + add gaps to fragility map
-- **Weak** → Cycle back with synthesised guidance
-- **Rejected** → Dead-end with structural constraint
+- **Sound** -> Merge
+- **Good** -> Merge + add gaps to fragility map
+- **Weak** -> Cycle back with synthesised guidance
+- **Rejected** -> Dead-end with structural constraint
 
 **Circuit breaker:** 3+ weak/rejected on same sub-type triggers a Maqasid Check (purpose audit).
+
+**Regression gates:** Fixtures flagged as `gate` block merge on regression regardless of verification grades.
 
 ## Configuration
 
@@ -131,19 +172,45 @@ Every decision is tagged with its justification level. Stored as database column
   "project": {
     "name": "my-project",
     "description": "...",
-    "objective": "..."
+    "objective": "What are we actually trying to achieve?"
   },
   "metrics": {
     "command": "python scripts/benchmark.py --json",
-    "fixtures": ["fixture1", "fixture2"]
+    "fixtures": {
+      "baseline_test": { "gate": true },
+      "target_test": {}
+    },
+    "tracked": {
+      "error_rate": { "direction": "lower_is_better" },
+      "accuracy": { "direction": "higher_is_better" },
+      "value_delta": { "direction": "closer_to_gt", "target": 0 }
+    }
+  },
+  "build": {
+    "pre_measure": "make build",
+    "post_measure": null
   },
   "cycle": {
     "compression_interval": 5,
     "circuit_breaker_threshold": 3,
-    "require_doubt_before_verify": true
+    "require_doubt_before_verify": true,
+    "require_challenge_before_verify": false,
+    "auto_baseline_on_new_experiment": true
   }
 }
 ```
+
+The metrics command must output JSON: `{ "fixtures": { "name": { "metric": value } } }`.
+
+Run `majlis status` to see which config fields are wired up and what's missing.
+
+## Experiment Features
+
+- **Regression gates:** Gate fixtures block merge on regression regardless of verification grades. One weak link invalidates the chain.
+- **Dependencies:** `--depends-on SLUG` blocks building until the prerequisite experiment is merged. Ordered problem decomposition.
+- **Scoped context:** `--context file1,file2` injects domain-specific reference material into agent prompts. Agents get the right knowledge for the right experiment.
+- **Structured metric comparison:** The verifier receives typed comparison results with regression flags and gate markers, not raw numbers.
+- **Project readiness:** `majlis status` runs diagnostic checks and surfaces what's configured, what's missing, and what the consequences are.
 
 ## Claude Code Integration
 

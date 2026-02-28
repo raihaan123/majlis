@@ -4,7 +4,7 @@ import type { MajlisConfig } from './types.js';
 
 const DEFAULT_CONFIG: MajlisConfig = {
   project: { name: '', description: '', objective: '' },
-  metrics: { command: '', fixtures: [], tracked: {} },
+  metrics: { command: '', fixtures: {}, tracked: {} },
   build: { pre_measure: null, post_measure: null },
   cycle: {
     compression_interval: 5,

@@ -268,6 +268,56 @@ export const WORKFLOW_MD = `# Majlis Workflow — Quick Reference
 | Session end | \`majlis session end\` |
 | Compress | \`majlis compress\` |
 | Audit | \`majlis audit "objective"\` |
+
+## Experiment Flags
+| Flag | Purpose |
+|------|---------|
+| \`--sub-type TYPE\` | Classify experiment by problem sub-type |
+| \`--depends-on SLUG\` | Block building until dependency is merged |
+| \`--context FILE,FILE\` | Inject domain-specific docs into agent context |
+
+Example: \`majlis new "improve fitting accuracy" --sub-type fitting --depends-on surface-construction --context docs/algorithms/fitting.md,fixtures/anatomy/part1/README.md\`
+
+## Project Readiness
+
+Majlis works with zero config — agents figure things out from CLAUDE.md. But each
+config field you wire up removes a failure mode and makes cycles more autonomous.
+
+### Metrics Command
+Your \`metrics.command\` must output JSON in this format:
+\`\`\`json
+{ "fixtures": { "fixture_name": { "metric_name": 123.4 } } }
+\`\`\`
+If your test harness outputs human-readable text, write a thin wrapper script that
+parses it into this format. The framework runs this command automatically before and
+after each build to capture regression data.
+
+### Fixtures and Gates
+Define your test cases in \`config.metrics.fixtures\`. Flag your regression baseline
+as a gate — regressions on gate fixtures block merge regardless of verification grades:
+\`\`\`json
+"fixtures": {
+  "baseline_test": { "gate": true },
+  "target_test": { "gate": false }
+}
+\`\`\`
+
+### Tracked Metrics
+Name the metrics you care about and set their direction:
+\`\`\`json
+"tracked": {
+  "error_rate": { "direction": "lower_is_better" },
+  "accuracy": { "direction": "higher_is_better" },
+  "value_delta": { "direction": "closer_to_gt", "target": 0 }
+}
+\`\`\`
+
+### Architecture Docs
+Agents read CLAUDE.md for project context. The more specific it is about where things
+live, how to build, and how to test, the better agents perform. Include build commands,
+test commands, file layout, and key patterns.
+
+Run \`majlis status\` to see which readiness checks pass and which need attention.
 `;
 
 export const SYNTHESIS_STARTERS: Record<string, string> = {

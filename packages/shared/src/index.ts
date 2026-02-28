@@ -14,3 +14,8 @@ export {
   type ConfigTemplateAnswers,
 } from './config.js';
 export { mkdirSafe } from './utils.js';
+export {
+  validateProject,
+  formatValidation,
+  type ValidationCheck,
+} from './validation.js';

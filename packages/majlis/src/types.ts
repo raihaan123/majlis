@@ -1,3 +1,7 @@
+export interface FixtureConfig {
+  gate?: boolean;       // If true, regression on this fixture blocks merge
+}
+
 export interface MajlisConfig {
   project: {
     name: string;
@@ -6,7 +10,7 @@ export interface MajlisConfig {
   };
   metrics: {
     command: string;
-    fixtures: string[];
+    fixtures: Record<string, FixtureConfig> | string[];
     tracked: Record<string, { direction: string; target?: number }>;
   };
   build: {
@@ -32,6 +36,8 @@ export interface Experiment {
   sub_type: string | null;
   hypothesis: string | null;
   builder_guidance: string | null;
+  depends_on: string | null;       // slug of prerequisite experiment
+  context_files: string | null;    // JSON array of relative file paths
   created_at: string;
   updated_at: string;
 }
@@ -123,4 +129,5 @@ export interface MetricComparison {
   after: number;
   delta: number;
   regression: boolean;
+  gate: boolean;                   // true if this fixture is a regression gate
 }

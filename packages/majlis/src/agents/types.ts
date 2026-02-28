@@ -114,6 +114,16 @@ export interface AgentContext {
   challenges?: string;
   verificationReport?: Verification[];
   confirmedDoubts?: Doubt[];
+  metricComparisons?: Array<{
+    fixture: string;
+    metric: string;
+    before: number;
+    after: number;
+    delta: number;
+    regression: boolean;
+    gate: boolean;
+  }>;
+  supplementaryContext?: string;   // Experiment-scoped files (Tradition 13: Ijtihad)
   taskPrompt?: string;
   sub_type?: string;
 }
