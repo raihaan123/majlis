@@ -9,10 +9,8 @@
     "build": "tsup src/index.ts --format cjs --clean",
     "test": "echo 'No tests yet'"
   },
-  "dependencies": {
-    "@majlis/shared": "*"
-  },
   "devDependencies": {
+    "@majlis/shared": "*",
     "@types/node": "^22.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0"
