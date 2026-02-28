@@ -63,6 +63,10 @@ Then the system **resolves** deterministically:
 
 No LLM decides the routing. The state machine does, based on grades and metrics. If a gate fixture regressed, the merge is blocked regardless of how good the verification grades look.
 
+If the **Gatekeeper** rejects a hypothesis, the experiment pauses at `gated` with the rejection reason stored. You can dispute with `majlis next --override-gate` or abandon with `majlis revert`. In autonomous mode, gate rejections auto-dead-end since there's no human to dispute.
+
+When you **revert** an experiment, a **Post-mortem** agent automatically analyses the attempt — the git diff, synthesis, and any artifact files — and produces a specific structural constraint for the dead-end record. This is how the framework learns from failure without you having to write the constraint yourself.
+
 **4. When the system warns you, compress:**
 ```bash
 majlis compress
@@ -85,6 +89,24 @@ The compressor rewrites the project's institutional memory — shorter and dense
 **Trust the dead-ends.** When an experiment is rejected, the structural constraint gets recorded permanently. Future experiments on the same sub-type see it. Don't retry the same approach — the circuit breaker will trip after 3 failures and force a purpose audit.
 
 **Compress frequently.** Don't let the session context bloat. When `majlis status` warns you, run `majlis compress`. The compressor cross-references everything in the database, resolves contradictions, and rewrites the synthesis.
+
+## Autonomous Operation
+
+For problems where you want the framework to run end-to-end without intervention:
+
+**Sequential (one experiment at a time):**
+```bash
+majlis run "Pass sig1 L6 segmentation"
+```
+
+The orchestrator plans experiments, creates them, runs full cycles, and creates new experiments when one is dead-ended — until the goal is met or all approaches are exhausted.
+
+**Parallel (multiple experiments in worktrees):**
+```bash
+majlis swarm "Improve collision detection" --parallel 3
+```
+
+Runs N experiments simultaneously in separate git worktrees. Each gets its own branch, DB, and full cycle. The best result is merged; the rest become dead-ends with learnings.
 
 ## Core Concepts
 
@@ -114,6 +136,10 @@ No agent can skip a step or jump ahead. The state machine is the adab (rules of 
 | **Compressor** | Compresses, cross-references, maintains dead-end registry | opus |
 | **Scout** | Searches externally for alternative approaches | opus |
 | **Gatekeeper** | Fast hypothesis quality check before building | sonnet |
+| **Post-mortem** | Analyses reverted experiments, extracts structural constraints | opus |
+| **Diagnostician** | Deep project-wide analysis with full codebase + DB access | opus |
+| **Cartographer** | Maps architecture of new codebases during init/scan | opus |
+| **Toolsmith** | Verifies toolchain, creates metrics pipeline wrapper | opus |
 
 ### The Evidence Hierarchy
 
@@ -194,7 +220,9 @@ Three packages in a monorepo:
 |                  LAYER 3: LLM Agents                    |
 | builder(opus) . critic(opus) . adversary(opus)          |
 | verifier(opus) . reframer(opus) . compressor(opus)      |
-| scout(opus) . gatekeeper(sonnet)                        |
+| scout(opus) . gatekeeper(sonnet) . postmortem(opus)     |
+| diagnostician(opus) . cartographer(opus)                |
+| toolsmith(opus)                                         |
 |                                                         |
 | Creative work. Judgment calls. The scholarship.         |
 +---------------------------------------------------------+
@@ -239,10 +267,10 @@ Experiments:
   baseline                   Capture metrics snapshot (before)
   measure                    Capture metrics snapshot (after)
   compare [--json]           Compare before/after, detect regressions
-  revert                     Revert experiment, log to dead-end
+  revert [--reason "..."]    Revert experiment with post-mortem analysis
 
 Cycle:
-  next [experiment] [--auto] Determine and execute next cycle step
+  next [experiment] [--auto] [--override-gate] Determine and execute next step
   build [experiment]         Spawn builder agent
   challenge [experiment]     Spawn adversary agent
   doubt [experiment]         Spawn critic agent
