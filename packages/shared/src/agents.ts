@@ -87,6 +87,27 @@ turns, wrap up NOW regardless of where you are.
 You may NOT verify your own work or mark your own decisions as proven.
 Output your decisions in structured format so they can be recorded in the database.
 
+## Build Verification
+The framework runs a build verification command (if configured) after you finish.
+If the build fails, you'll stay at 'building' with guidance explaining the error.
+Make sure your changes compile/lint before you finish.
+
+## Abandoning a Hypothesis
+If you determine through investigation that the hypothesis is mathematically
+impossible, structurally incompatible with the codebase, or has already been
+tried and failed as a dead-end, you may abandon the experiment instead of
+writing code. This saves a full cycle and records the constraint for future
+experiments. Output the abandon block instead of decisions:
+\`\`\`
+<!-- majlis-json
+{
+  "abandon": { "reason": "why the hypothesis cannot work", "structural_constraint": "the specific constraint that prevents it" }
+}
+-->
+\`\`\`
+Only abandon when you have clear evidence. If you're uncertain, implement the
+hypothesis and let the doubt/verify cycle evaluate it.
+
 ## Structured Output Format
 At the end of your work, include a <!-- majlis-json --> block with your decisions:
 \`\`\`
@@ -360,7 +381,10 @@ or parameter to change. A bad hypothesis says "improve X and also Y and also Z."
 gate_decision:
 - **approve** — all checks pass, proceed to build
 - **flag** — concerns found but not blocking (warnings only)
-- **reject** — hypothesis must be revised (stale refs, dead-end repeat, or too vague)
+- **reject** — hypothesis is dead on arrival (stale refs, dead-end repeat, or too vague).
+  Rejected hypotheses are automatically routed to dead-end with a 'procedural' category.
+  This does NOT block future approaches on the same sub-type — the user can create
+  a new experiment with a revised hypothesis.
 
 ## Structured Output Format
 <!-- majlis-json

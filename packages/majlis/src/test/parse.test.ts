@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { extractMajlisJsonBlock, tryParseJson, extractViaPatterns } from '../agents/parse.js';
+import { extractMajlisJsonBlock, tryParseJson, extractViaPatterns, extractStructuredData } from '../agents/parse.js';
 
 describe('Tier 1: extractMajlisJsonBlock()', () => {
   it('extracts JSON from a well-formed <!-- majlis-json --> block', () => {
@@ -112,5 +112,65 @@ Severity: critical
     const result = extractViaPatterns('builder', markdown);
     // Should return an object but with no data arrays
     assert.ok(result);
+  });
+
+  it('extracts abandon marker from builder output', () => {
+    const markdown = `
+## Investigation
+
+After analyzing the codebase, this hypothesis cannot work.
+
+[ABANDON] The torus topology has no seam-free embedding in R3
+Structural constraint: Euler characteristic of torus is 0, requiring at least one cut
+`;
+    const result = extractViaPatterns('builder', markdown);
+    assert.ok(result?.abandon);
+    assert.ok(result.abandon.reason.includes('torus topology'));
+    assert.ok(result.abandon.structural_constraint.includes('Euler characteristic'));
+  });
+
+  it('extracts HYPOTHESIS INVALID marker', () => {
+    const markdown = `
+## Analysis
+
+HYPOTHESIS INVALID: The function does not exist in the current codebase — it was removed in commit abc123.
+`;
+    const result = extractViaPatterns('builder', markdown);
+    assert.ok(result?.abandon);
+    assert.ok(result.abandon.reason.includes('does not exist'));
+  });
+
+  it('does not extract abandon from non-builder roles', () => {
+    const markdown = `[ABANDON] Something here\nConstraint: test`;
+    const result = extractViaPatterns('verifier', markdown);
+    assert.equal(result?.abandon, undefined);
+  });
+});
+
+// ── Fix #4: Extraction Tier Tracking ───────────────────────
+describe('extractStructuredData() tier tracking', () => {
+  it('returns tier 1 for valid majlis-json block', async () => {
+    const markdown = `# Report\n<!-- majlis-json\n{"decisions": [{"description": "test", "evidence_level": "judgment", "justification": "because"}]}\n-->`;
+    const { data, tier } = await extractStructuredData('builder', markdown);
+    assert.ok(data);
+    assert.equal(tier, 1);
+    assert.ok(data.decisions);
+  });
+
+  it('returns tier 2 for regex-extracted data', async () => {
+    const markdown = `## Decisions\n[judgment] Use approach A for surface splitting\n`;
+    const { data, tier } = await extractStructuredData('builder', markdown);
+    assert.ok(data);
+    assert.equal(tier, 2);
+    assert.ok(data.decisions);
+  });
+
+  it('returns null tier when all tiers fail', async () => {
+    const markdown = 'Just plain text with no structured markers at all.';
+    const { data, tier } = await extractStructuredData('builder', markdown);
+    // Tier 1 and 2 will fail. Tier 3 (Haiku) would need a real API call,
+    // so in test env it should also fail, giving us null/null.
+    // If Haiku is available it will return tier 3 — either way, the shape is correct.
+    assert.ok(tier === null || tier === 3);
   });
 });

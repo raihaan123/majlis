@@ -11,6 +11,7 @@ export interface AgentResult {
   output: string;
   structured: StructuredOutput | null;
   truncated: boolean;
+  extractionTier: 1 | 2 | 3 | null;  // Which parsing tier produced structured output
 }
 
 export interface StructuredOutput {
@@ -92,6 +93,11 @@ export interface StructuredOutput {
     verification_output: string;
     issues: string[];
   };
+  // Builder abandon (Tradition 13: Ijtihad — qualified judgment that hypothesis is invalid)
+  abandon?: {
+    reason: string;
+    structural_constraint: string;
+  };
 }
 
 export interface AgentContext {
@@ -124,6 +130,7 @@ export interface AgentContext {
     gate: boolean;
   }>;
   supplementaryContext?: string;   // Experiment-scoped files (Tradition 13: Ijtihad)
+  experimentLineage?: string;      // Structured DB records for related experiments (Tradition 1: Hafiz)
   taskPrompt?: string;
   sub_type?: string;
 }
@@ -147,7 +154,7 @@ export const EXTRACTION_SCHEMA = `{
 export function getExtractionSchema(role: string): string {
   switch (role) {
     case 'builder':
-      return '{"decisions": [{"description": "string", "evidence_level": "proof|test|strong_consensus|consensus|analogy|judgment", "justification": "string"}]}';
+      return '{"decisions": [{"description": "string", "evidence_level": "proof|test|strong_consensus|consensus|analogy|judgment", "justification": "string"}], "abandon": {"reason": "string", "structural_constraint": "string"}}';
     case 'critic':
       return '{"doubts": [{"claim_doubted": "string", "evidence_level_of_claim": "string", "evidence_for_doubt": "string", "severity": "minor|moderate|critical"}]}';
     case 'adversary':

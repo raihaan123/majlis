@@ -259,10 +259,13 @@ function buildPreToolUseGuards(role: string, cwd: string): HookCallbackMatcher[]
       return {};
     };
 
-    // Block writes to framework config
+    // Block writes to framework config and agent definitions
+    // Fix #2: Tradition 12 (Adab al-Bahth) — builder must not modify its own instructions
     const configFile = path.resolve(cwd, '.majlis', 'config.json');
     const dbFile = path.resolve(cwd, '.majlis', 'majlis.db');
     const settingsFile = path.resolve(cwd, '.claude', 'settings.json');
+    const claudeDir = path.resolve(cwd, '.claude');
+    const agentsDir = path.resolve(cwd, '.majlis', 'agents');
     const configGuard: HookCallback = async (input) => {
       const toolInput = (input as any).tool_input ?? {};
       const filePath: string = toolInput.file_path ?? '';
@@ -270,6 +273,9 @@ function buildPreToolUseGuards(role: string, cwd: string): HookCallbackMatcher[]
         const resolved = path.resolve(filePath);
         if (resolved === configFile || resolved === dbFile || resolved === settingsFile) {
           return { decision: 'block' as const, reason: `Builder may not modify framework files: ${filePath}` };
+        }
+        if (isInsideDir(resolved, claudeDir) || isInsideDir(resolved, agentsDir)) {
+          return { decision: 'block' as const, reason: `Builder may not modify agent definitions or framework settings: ${filePath}` };
         }
       }
       return {};
@@ -283,10 +289,13 @@ function buildPreToolUseGuards(role: string, cwd: string): HookCallbackMatcher[]
   }
 
   if (role === 'verifier') {
-    // Block writes to framework config
+    // Block writes to framework config and agent definitions
+    // Fix #2: Tradition 12 (Adab al-Bahth) — verifier must not modify agent definitions either
     const configFile = path.resolve(cwd, '.majlis', 'config.json');
     const dbFile = path.resolve(cwd, '.majlis', 'majlis.db');
     const settingsFile = path.resolve(cwd, '.claude', 'settings.json');
+    const claudeDir = path.resolve(cwd, '.claude');
+    const agentsDir = path.resolve(cwd, '.majlis', 'agents');
     const configGuard: HookCallback = async (input) => {
       const toolInput = (input as any).tool_input ?? {};
       const filePath: string = toolInput.file_path ?? '';
@@ -294,6 +303,9 @@ function buildPreToolUseGuards(role: string, cwd: string): HookCallbackMatcher[]
         const resolved = path.resolve(filePath);
         if (resolved === configFile || resolved === dbFile || resolved === settingsFile) {
           return { decision: 'block' as const, reason: `Verifier may not modify framework files: ${filePath}` };
+        }
+        if (isInsideDir(resolved, claudeDir) || isInsideDir(resolved, agentsDir)) {
+          return { decision: 'block' as const, reason: `Verifier may not modify agent definitions or framework settings: ${filePath}` };
         }
       }
       return {};
@@ -396,7 +408,8 @@ export async function spawnAgent(
   }
 
   // Extract structured data via 3-tier parsing
-  const structured = await extractStructuredData(role, markdown);
+  // Fix #4: Tradition 3 (Hadith) — track extraction tier for provenance
+  const { data: structured, tier: extractionTier } = await extractStructuredData(role, markdown);
 
   // Validate role-specific output
   if (structured) {
@@ -406,7 +419,11 @@ export async function spawnAgent(
     }
   }
 
-  return { output: markdown, structured, truncated };
+  if (extractionTier === 3) {
+    console.warn(`[${role}] WARNING: Structured output was reconstructed by Haiku (tier 3). Data provenance degraded.`);
+  }
+
+  return { output: markdown, structured, truncated, extractionTier };
 }
 
 /**
@@ -454,7 +471,7 @@ export async function spawnSynthesiser(
 
   // The synthesiser's output IS the guidance — skip 3-tier extraction
   // (it never outputs <!-- majlis-json --> reliably, wasting a Haiku call).
-  return { output: markdown, structured: { guidance: markdown }, truncated };
+  return { output: markdown, structured: { guidance: markdown }, truncated, extractionTier: null };
 }
 
 /**

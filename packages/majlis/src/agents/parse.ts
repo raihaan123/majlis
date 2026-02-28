@@ -2,22 +2,31 @@ import type { StructuredOutput } from './types.js';
 import { EXTRACTION_SCHEMA, getExtractionSchema, ROLE_REQUIRED_FIELDS } from './types.js';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
+/** Result from 3-tier extraction including provenance metadata. */
+export interface ExtractionResult {
+  data: StructuredOutput | null;
+  tier: 1 | 2 | 3 | null;  // Fix #4: Tradition 3 (Hadith) — provenance of the extraction chain
+}
+
 /**
  * 3-tier extraction strategy for structured data from agent output.
  * PRD v2 §4.6 + §9.2.
  *
  * LLMs are unreliable at JSON formatting under complex reasoning load.
  * Never fail silently — warn loudly, degrade gracefully.
+ *
+ * Fix #4: Returns { data, tier } — tier tracks provenance.
+ * Tradition 15 (Tajwid): subtle distortions in extraction compound over generations.
  */
 export async function extractStructuredData(
   role: string,
   markdown: string,
-): Promise<StructuredOutput | null> {
+): Promise<ExtractionResult> {
   // Tier 1: Parse <!-- majlis-json --> block
   const tier1 = extractMajlisJsonBlock(markdown);
   if (tier1) {
     const parsed = tryParseJson(tier1);
-    if (parsed) return parsed;
+    if (parsed) return { data: parsed, tier: 1 };
     console.warn(`[majlis] Malformed JSON in <!-- majlis-json --> block for ${role}. Falling back.`);
   } else {
     console.warn(`[majlis] No <!-- majlis-json --> block found in ${role} output. Falling back.`);
@@ -27,20 +36,23 @@ export async function extractStructuredData(
   const tier2 = extractViaPatterns(role, markdown);
   if (tier2 && hasData(tier2)) {
     console.warn(`[majlis] Used regex fallback for ${role}. Review extracted data.`);
-    return tier2;
+    return { data: tier2, tier: 2 };
   }
 
   // Tier 3: Haiku post-processing
   console.warn(`[majlis] Regex fallback insufficient for ${role}. Using Haiku extraction.`);
   const tier3 = await extractViaHaiku(role, markdown);
-  if (tier3) return tier3;
+  if (tier3) {
+    console.warn(`[majlis] Tier 3 (Haiku) extraction used for ${role}. Data provenance degraded.`);
+    return { data: tier3, tier: 3 };
+  }
 
   // All tiers failed
   console.error(
     `[majlis] FAILED to extract structured data from ${role} output. ` +
     `State machine will continue but data is missing. Manual review required.`
   );
-  return null;
+  return { data: null, tier: null };
 }
 
 /**
@@ -135,6 +147,26 @@ export function extractViaPatterns(role: string, markdown: string): StructuredOu
   }
   if (doubts.length > 0) result.doubts = doubts;
 
+  // Tier 2 abandon detection (builder only) — Tradition 13 (Ijtihad)
+  if (role === 'builder') {
+    const abandonPattern = /\[ABANDON\]\s*(.+?)(?:\n|$)[\s\S]*?(?:structural.?constraint|Constraint|CONSTRAINT)\s*[:=]\s*(.+?)(?:\n|$)/im;
+    const abandonMatch = markdown.match(abandonPattern);
+    if (abandonMatch) {
+      result.abandon = {
+        reason: abandonMatch[1].trim(),
+        structural_constraint: abandonMatch[2].trim(),
+      };
+    }
+    // Also detect "HYPOTHESIS INVALID" marker
+    const invalidMatch = markdown.match(/(?:HYPOTHESIS\s+INVALID|HYPOTHESIS\s+IMPOSSIBLE)\s*[:.\-—]\s*(.+?)(?:\n|$)/im);
+    if (invalidMatch && !result.abandon) {
+      result.abandon = {
+        reason: invalidMatch[1].trim(),
+        structural_constraint: 'Extracted via regex — review original document',
+      };
+    }
+  }
+
   return result;
 }
 
@@ -190,7 +222,8 @@ function hasData(output: StructuredOutput): boolean {
     output.reframe ||
     output.compression_report ||
     output.gate_decision ||
-    output.diagnosis
+    output.diagnosis ||
+    output.abandon
   );
 }
 

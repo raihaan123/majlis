@@ -505,7 +505,7 @@ export function updateSwarmMember(
  * Export structured data for the compressor agent.
  * Returns formatted markdown with all structured data from the DB.
  */
-export function exportForCompressor(db: Database.Database, maxLength: number = 30000): string {
+export function exportForCompressor(db: Database.Database, maxLength: number = 50000): string {
   const experiments = listAllExperiments(db);
   const sections: string[] = ['# Structured Data Export (from SQLite)\n'];
 
@@ -576,6 +576,102 @@ export function exportForCompressor(db: Database.Database, maxLength: number = 3
   const full = sections.join('\n');
   if (full.length > maxLength) {
     return full.slice(0, maxLength) + `\n\n[TRUNCATED — full export was ${full.length} chars]`;
+  }
+  return full;
+}
+
+/**
+ * Export structured lineage for experiments sharing the same sub-type.
+ * Tradition 1 (Hafiz): Agents need access to structured ground truth, not just compressed form.
+ * Tradition 14 (Shura): Inject raw evaluations so consultation is genuine.
+ * Returns decisions, metric deltas, doubt resolutions, and dead-end constraints.
+ */
+export function exportExperimentLineage(
+  db: Database.Database,
+  subType: string | null,
+  maxLength: number = 15000,
+): string {
+  // Query all experiments with the same sub_type (or all if null)
+  const experiments = subType
+    ? db.prepare(`SELECT * FROM experiments WHERE sub_type = ? ORDER BY created_at`).all(subType) as Experiment[]
+    : listAllExperiments(db);
+
+  if (experiments.length === 0) return '';
+
+  const sections: string[] = ['## Experiment Lineage (from DB — canonical, not from synthesis)\n'];
+
+  for (const exp of experiments) {
+    sections.push(`### ${exp.slug} [${exp.status}]`);
+    if (exp.hypothesis) sections.push(`Hypothesis: ${exp.hypothesis}`);
+
+    // Decisions with evidence levels
+    const decisions = listDecisionsByExperiment(db, exp.id);
+    if (decisions.length > 0) {
+      sections.push('Decisions:');
+      for (const d of decisions) {
+        sections.push(`  - [${d.evidence_level}/${d.status}] ${d.description}`);
+      }
+    }
+
+    // Metric deltas (before→after comparisons)
+    const beforeMetrics = getMetricsByExperimentAndPhase(db, exp.id, 'before');
+    const afterMetrics = getMetricsByExperimentAndPhase(db, exp.id, 'after');
+    if (beforeMetrics.length > 0 && afterMetrics.length > 0) {
+      sections.push('Metrics:');
+      for (const bm of beforeMetrics) {
+        const am = afterMetrics.find(a => a.fixture === bm.fixture && a.metric_name === bm.metric_name);
+        if (am) {
+          const delta = am.metric_value - bm.metric_value;
+          const sign = delta >= 0 ? '+' : '';
+          sections.push(`  - ${bm.fixture}/${bm.metric_name}: ${bm.metric_value} → ${am.metric_value} (${sign}${delta.toFixed(4)})`);
+        }
+      }
+    }
+
+    // Doubt resolutions
+    const doubts = getDoubtsByExperiment(db, exp.id);
+    const resolved = doubts.filter(d => d.resolution);
+    if (resolved.length > 0) {
+      sections.push('Doubt resolutions:');
+      for (const d of resolved) {
+        sections.push(`  - [${d.resolution}] ${d.claim_doubted}`);
+      }
+    }
+
+    // Verifications
+    const verifications = getVerificationsByExperiment(db, exp.id);
+    if (verifications.length > 0) {
+      sections.push('Grades:');
+      for (const v of verifications) {
+        sections.push(`  - ${v.component}: ${v.grade}${v.notes ? ` — ${v.notes}` : ''}`);
+      }
+    }
+
+    sections.push('');
+
+    // Early exit if we're getting close to the limit
+    const current = sections.join('\n');
+    if (current.length > maxLength - 500) {
+      sections.push(`[LINEAGE TRUNCATED — ${experiments.length - experiments.indexOf(exp) - 1} experiments omitted]`);
+      break;
+    }
+  }
+
+  // Dead ends for this sub-type (outside experiment loop — these are structural constraints)
+  const deadEnds = subType
+    ? listDeadEndsBySubType(db, subType)
+    : listAllDeadEnds(db);
+
+  if (deadEnds.length > 0) {
+    sections.push('### Dead Ends (structural constraints)');
+    for (const de of deadEnds) {
+      sections.push(`- [${de.category ?? 'structural'}] ${de.approach}: ${de.structural_constraint}`);
+    }
+  }
+
+  const full = sections.join('\n');
+  if (full.length > maxLength) {
+    return full.slice(0, maxLength) + `\n\n[LINEAGE TRUNCATED at ${maxLength} chars]`;
   }
   return full;
 }

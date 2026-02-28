@@ -75,6 +75,7 @@ export const CONTEXT_LIMITS = {
   fragility: 15_000,
   experimentDoc: 15_000,
   deadEnds: 15_000,
+  experimentLineage: 15_000,
 } as const;
 
 /** Truncate content with a marker if it exceeds the limit. */

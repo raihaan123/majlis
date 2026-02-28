@@ -17,6 +17,7 @@ import {
   listStructuralDeadEnds,
   listStructuralDeadEndsBySubType,
   getBuilderGuidance,
+  storeBuilderGuidance,
   exportForCompressor,
   insertDecision,
   insertDoubt,
@@ -27,8 +28,9 @@ import {
   insertDeadEnd,
   insertMetric,
   updateDoubtResolution,
+  exportExperimentLineage,
 } from '../db/queries.js';
-import { transition } from '../state/machine.js';
+import { transition, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
 import { spawnAgent, spawnRecovery } from '../agents/spawn.js';
 import { resolve as resolveExperiment } from '../resolve.js';
@@ -156,9 +158,14 @@ async function doGate(db: ReturnType<typeof getDb>, exp: Experiment, root: strin
   const reason = result.structured?.reason ?? '';
 
   if (decision === 'reject') {
-    updateExperimentStatus(db, exp.id, 'gated');
-    fmt.warn(`Gate REJECTED for ${exp.slug}: ${reason}`);
-    fmt.warn(`Revise the hypothesis or run \`majlis revert\` to abandon.`);
+    // Fix #5B: Gatekeeper reject → DEAD_END
+    // Tradition 10 (Maqasid): procedure over purpose wastes a full cycle on a known-bad hypothesis
+    // Dead-end is 'procedural' — doesn't block future approaches on same sub-type
+    insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug,
+      reason, `Gate rejected: ${reason}`, exp.sub_type, 'procedural');
+    adminTransitionAndPersist(db, exp.id, 'gated' as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
+    fmt.warn(`Gate REJECTED for ${exp.slug}: ${reason}. Dead-ended.`);
+    return;
   } else {
     if (decision === 'flag') {
       fmt.warn(`Gate flagged concerns for ${exp.slug}: ${reason}`);
@@ -231,6 +238,13 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
   // Load experiment-scoped context files (Tradition 13: Ijtihad)
   const supplementaryContext = loadExperimentContext(exp, root);
 
+  // Fix #1: Experiment lineage — Tradition 1 (Hafiz), Tradition 14 (Shura)
+  // Inject structured DB records so builder has canonical history, not just lossy synthesis
+  const lineage = exportExperimentLineage(db, exp.sub_type);
+  if (lineage) {
+    taskPrompt += '\n\n' + lineage;
+  }
+
   const result = await spawnAgent('builder', {
     experiment: {
       id: exp.id,
@@ -249,11 +263,23 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
     synthesis,
     confirmedDoubts,
     supplementaryContext: supplementaryContext || undefined,
+    experimentLineage: lineage || undefined,
     taskPrompt,
   }, root);
 
   // Ingest structured output
   ingestStructuredOutput(db, exp.id, result.structured);
+
+  // Fix #5A: Builder abandon — Tradition 13 (Ijtihad): qualified judgment that hypothesis is invalid
+  if (result.structured?.abandon) {
+    insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug,
+      result.structured.abandon.reason,
+      result.structured.abandon.structural_constraint,
+      exp.sub_type, 'structural');
+    adminTransitionAndPersist(db, exp.id, 'building' as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
+    fmt.info(`Builder abandoned ${exp.slug}: ${result.structured.abandon.reason}`);
+    return;
+  }
 
   if (result.truncated && !result.structured) {
     // Builder hit max turns without producing structured output.
@@ -264,6 +290,25 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
     }, root);
     fmt.warn(`Experiment stays at 'building'. Run \`majlis build\` to retry or \`majlis revert\` to abandon.`);
   } else {
+    // Fix #3: Build verification gate — Tradition 3 (Hadith): weak link invalidates chain
+    // Tradition 15 (Tajwid): broken code is a distortion of the builder's intent
+    if (config.build?.pre_measure) {
+      try {
+        const [cmd, ...cmdArgs] = config.build.pre_measure.split(/\s+/);
+        execFileSync(cmd, cmdArgs, {
+          cwd: root, encoding: 'utf-8', timeout: 30_000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const guidance = `Build verification failed after builder completion. Code may be syntactically broken or incomplete.\nError: ${errMsg.slice(0, 500)}`;
+        storeBuilderGuidance(db, exp.id, guidance);
+        fmt.warn(`Build verification failed for ${exp.slug}. Staying at 'building'.`);
+        fmt.warn(`Guidance stored for retry. Run \`majlis build\` to retry.`);
+        return;
+      }
+    }
+
     // Framework-controlled metrics: capture AFTER build
     if (config.metrics?.command) {
       try {
@@ -283,6 +328,16 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
     // This ensures gitRevert() can cleanly discard the branch on rejection,
     // and gitMerge() has actual commits to merge on success.
     gitCommitBuild(exp, root);
+
+    // Fix #4: Provenance flagging — Tradition 3 (Hadith): chain provenance
+    // If builder output was extracted via tier 3 (Haiku), flag it for the verifier
+    if (result.extractionTier === 3) {
+      fmt.warn(`Builder output extracted via Haiku (tier 3). Data provenance degraded.`);
+      const existing = getBuilderGuidance(db, exp.id) ?? '';
+      storeBuilderGuidance(db, exp.id,
+        existing + '\n[PROVENANCE WARNING] Builder structured output was reconstructed by a secondary model (tier 3). Treat reported decisions with additional scrutiny.');
+    }
+
     updateExperimentStatus(db, exp.id, 'built');
     fmt.success(`Build complete for ${exp.slug}. Run \`majlis doubt\` or \`majlis challenge\` next.`);
   }
@@ -496,6 +551,22 @@ async function doVerify(db: ReturnType<typeof getDb>, exp: Experiment, root: str
   // Load experiment-scoped context for verifier (Tradition 13: Ijtihad)
   const verifierSupplementaryContext = loadExperimentContext(exp, root);
 
+  // Fix #1: Experiment lineage — Tradition 1 (Hafiz), Tradition 14 (Shura)
+  const verifierLineage = exportExperimentLineage(db, exp.sub_type);
+  let verifierTaskPrompt =
+    `Verify experiment ${exp.slug}: ${exp.hypothesis}. Check provenance and content. ` +
+    `Test the ${doubts.length} doubt(s) and any adversarial challenges.` +
+    metricsSection + doubtReference;
+  if (verifierLineage) {
+    verifierTaskPrompt += '\n\n' + verifierLineage;
+  }
+
+  // Fix #4: Provenance warning — if builder used tier 3 extraction, warn verifier
+  const builderGuidanceForVerifier = getBuilderGuidance(db, exp.id);
+  if (builderGuidanceForVerifier?.includes('[PROVENANCE WARNING]')) {
+    verifierTaskPrompt += '\n\nNote: The builder\'s structured output was reconstructed by a secondary model (tier 3). Treat reported decisions with additional scrutiny.';
+  }
+
   const result = await spawnAgent('verifier', {
     experiment: {
       id: exp.id,
@@ -509,10 +580,8 @@ async function doVerify(db: ReturnType<typeof getDb>, exp: Experiment, root: str
     challenges,
     metricComparisons: metricComparisons.length > 0 ? metricComparisons : undefined,
     supplementaryContext: verifierSupplementaryContext || undefined,
-    taskPrompt:
-      `Verify experiment ${exp.slug}: ${exp.hypothesis}. Check provenance and content. ` +
-      `Test the ${doubts.length} doubt(s) and any adversarial challenges.` +
-      metricsSection + doubtReference,
+    experimentLineage: verifierLineage || undefined,
+    taskPrompt: verifierTaskPrompt,
   }, root);
 
   ingestStructuredOutput(db, exp.id, result.structured);

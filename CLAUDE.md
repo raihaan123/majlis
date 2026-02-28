@@ -39,6 +39,13 @@ npm test             # runs tests in both consumer packages
 - **Scoped context:** `majlis new --context file1,file2` injects domain-specific docs into agent prompts (Tradition 13: Ijtihad prerequisite mastery).
 - **Structured metric comparison:** Verifier receives typed `MetricComparison[]` with regression flags and gate markers (Tradition 15: Tajwid precision).
 - **Project readiness:** `majlis status` runs diagnostic checks on config, fixtures, metrics, and docs.
+- **Build verification gate:** If `config.build.pre_measure` is set, runs after builder finishes — broken code stays at 'building' with guidance for retry. Skips if unconfigured (Tradition 3: weak link invalidates chain).
+- **Builder abandon:** Builder can abandon a hypothesis it determines is structurally impossible, outputting `{ "abandon": { "reason": "...", "structural_constraint": "..." } }`. Records dead-end and skips the full cycle (Tradition 13: Ijtihad qualified judgment).
+- **Gatekeeper reject → dead-end:** Gate rejection now routes directly to DEAD_END with a 'procedural' category (doesn't block future approaches). No longer stays at 'gated' waiting for manual intervention (Tradition 10: Maqasid — procedure over purpose).
+- **Experiment lineage:** Builder and verifier receive structured DB records for related experiments (same sub-type). Injected as canonical context alongside synthesis (Tradition 1: Hafiz, Tradition 14: Shura — genuine consultation).
+- **Output provenance tracking:** `extractStructuredData` returns `{ data, tier }` — tier 1 (JSON), 2 (regex), 3 (Haiku). Tier 3 triggers a provenance warning to the verifier (Tradition 3: chain provenance, Tradition 15: Tajwid distortion flagging).
+- **Extended write guards:** Builder and verifier are blocked from modifying `.claude/` and `.majlis/agents/` directories (Tradition 12: Adab al-Bahth — agents must not modify their own instructions).
+- **Swarm rebase on conflict:** Merge conflicts trigger rebase + gate re-verification. If gates hold, fast-forward merge; if violated, manual intervention required (Tradition 9: 'Ilm al-Ikhtilaf — factual disagreement resolved mechanically).
 
 ## Canonical Reference
 - PRD: See `FOUNDATIONS.md` for intellectual principles.

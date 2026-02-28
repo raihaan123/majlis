@@ -8,11 +8,14 @@ import {
   updateSwarmMember,
   listAllDeadEnds,
   getExperimentBySlug,
+  insertMetric,
+  getMetricsByExperimentAndPhase,
 } from '../db/queries.js';
 import { adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
 import { spawnSynthesiser, generateSlug } from '../agents/spawn.js';
 import { loadConfig, readFileOrEmpty, readLatestDiagnosis, truncateContext, CONTEXT_LIMITS, getFlagValue } from '../config.js';
+import { parseMetricsOutput, compareMetrics, checkGateViolations } from '../metrics.js';
 import { createWorktree, initializeWorktree, cleanupWorktree } from '../swarm/worktree.js';
 import { runExperimentInWorktree } from '../swarm/runner.js';
 import { aggregateSwarmResults } from '../swarm/aggregate.js';
@@ -163,18 +166,86 @@ export async function swarm(args: string[]): Promise<void> {
     summary.goal = goal;
 
     // Phase 5: Git merge best experiment
+    // Fix #6: Tradition 9 ('Ilm al-Ikhtilaf) — merge conflicts are factual, not intellectual
+    // Tradition 3 (Hadith): after rebase, re-verify the chain
     if (summary.bestExperiment && isMergeable(summary.bestExperiment.overallGrade)) {
       const best = summary.bestExperiment;
       fmt.info(`Best experiment: ${best.worktree.slug} (${best.overallGrade})`);
 
+      let merged = false;
       try {
         execFileSync('git', ['merge', best.worktree.branch, '--no-ff', '-m', `Merge swarm winner: ${best.worktree.slug}`],
           { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
         );
         fmt.success(`Merged ${best.worktree.slug} into main.`);
+        merged = true;
       } catch {
-        fmt.warn(`Git merge of ${best.worktree.slug} failed. Merge manually with:`);
-        fmt.info(`  git merge ${best.worktree.branch} --no-ff`);
+        // Merge conflict — try rebase + re-verify
+        fmt.warn(`Git merge of ${best.worktree.slug} failed (conflict). Attempting rebase...`);
+        try {
+          execFileSync('git', ['merge', '--abort'], { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+        } catch { /* merge may not be in progress */ }
+
+        try {
+          execFileSync('git', ['rebase', 'main', best.worktree.branch],
+            { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+          );
+          fmt.info(`Rebase of ${best.worktree.slug} onto main succeeded. Re-verifying gates...`);
+
+          // Re-run metrics on the rebased code and check gate violations
+          const config = loadConfig(root);
+          let gatesHold = true;
+          if (config.metrics?.command && best.experiment) {
+            try {
+              const output = execSync(config.metrics.command, {
+                cwd: root, encoding: 'utf-8', timeout: 60_000,
+                stdio: ['pipe', 'pipe', 'pipe'],
+              }).trim();
+              const parsed = parseMetricsOutput(output);
+              // Store rebased metrics as 'after' phase (overwriting previous 'after')
+              for (const m of parsed) {
+                insertMetric(db, best.experiment.id, 'after', m.fixture, m.metric_name, m.metric_value);
+              }
+              // Use compareMetrics to get structured comparisons, then check gates
+              const comparisons = compareMetrics(db, best.experiment.id, config);
+              const gateViolations = checkGateViolations(comparisons);
+              if (gateViolations.length > 0) {
+                gatesHold = false;
+                fmt.warn(`Gate violations after rebase:`);
+                for (const v of gateViolations) {
+                  fmt.warn(`  - ${v.fixture}/${v.metric}: ${v.before} → ${v.after} (delta: ${v.delta})`);
+                }
+              }
+            } catch {
+              fmt.warn('Could not re-capture metrics after rebase. Proceeding cautiously.');
+            }
+          }
+
+          if (gatesHold) {
+            // Switch to main and fast-forward merge
+            execFileSync('git', ['checkout', 'main'], { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+            execFileSync('git', ['merge', '--ff-only', best.worktree.branch],
+              { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+            );
+            fmt.success(`Merged ${best.worktree.slug} into main (via rebase + ff).`);
+            merged = true;
+          } else {
+            fmt.warn(`Gate violations after rebase. NOT merging ${best.worktree.slug}.`);
+            fmt.info(`Manual resolution needed:`);
+            fmt.info(`  git checkout main && git merge ${best.worktree.branch} --no-ff`);
+          }
+        } catch {
+          // Rebase failed — abort and give manual instructions
+          try {
+            execFileSync('git', ['rebase', '--abort'], { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+          } catch { /* rebase may not be in progress */ }
+          fmt.warn(`Rebase of ${best.worktree.slug} also failed. Manual merge required:`);
+          fmt.info(`  git merge ${best.worktree.branch} --no-ff`);
+        }
+      }
+
+      if (!merged) {
+        fmt.info(`${best.worktree.slug} was NOT merged automatically.`);
       }
     } else {
       fmt.info('No experiment achieved sound/good grade. Nothing merged.');

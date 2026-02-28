@@ -41,6 +41,8 @@ import {
   getSessionsSinceCompression,
   recordCompression,
   getLastCompression,
+  exportExperimentLineage,
+  exportForCompressor,
 } from '../db/queries.js';
 import type Database from 'better-sqlite3';
 
@@ -425,5 +427,68 @@ describe('Compressions', () => {
     recordCompression(db, 3, 1000, 500);
     db.prepare("INSERT INTO sessions (intent, started_at) VALUES (?, datetime('now', '+1 seconds'))").run('S4');
     assert.equal(getSessionsSinceCompression(db), 1);
+  });
+});
+
+// ── Fix #1: Experiment Lineage ─────────────────────────────
+describe('exportExperimentLineage()', () => {
+  it('includes decisions, metrics, doubts, verifications, and dead-ends', () => {
+    const exp = createExperiment(db, 'lineage-test', 'exp/001-lineage-test', 'Test lineage', 'geometry', null);
+    insertDecision(db, exp.id, 'Use approach A', 'test', 'Validated via fixture');
+    insertMetric(db, exp.id, 'before', 'fixture1', 'accuracy', 0.85);
+    insertMetric(db, exp.id, 'after', 'fixture1', 'accuracy', 0.92);
+    insertDoubt(db, exp.id, 'Tolerance assumption', 'test', 'Edge case not covered', 'moderate');
+    updateDoubtResolution(db, 1, 'confirmed');
+    insertVerification(db, exp.id, 'approach_A', 'sound', true, true, 'Looks good');
+    insertDeadEnd(db, exp.id, 'approach B', 'Failed structurally', 'Cannot handle topology', 'geometry', 'structural');
+
+    const lineage = exportExperimentLineage(db, 'geometry');
+    assert.ok(lineage.includes('lineage-test'));
+    assert.ok(lineage.includes('Use approach A'));
+    assert.ok(lineage.includes('[test/active]'));
+    assert.ok(lineage.includes('fixture1/accuracy'));
+    assert.ok(lineage.includes('0.85'));
+    assert.ok(lineage.includes('0.92'));
+    assert.ok(lineage.includes('[confirmed]'));
+    assert.ok(lineage.includes('approach_A: sound'));
+    assert.ok(lineage.includes('approach B'));
+    assert.ok(lineage.includes('Cannot handle topology'));
+  });
+
+  it('filters by sub_type', () => {
+    createExperiment(db, 'geo-exp', 'exp/001-geo', 'Geometry test', 'geometry', null);
+    createExperiment(db, 'algo-exp', 'exp/002-algo', 'Algorithm test', 'algorithm', null);
+
+    const geoLineage = exportExperimentLineage(db, 'geometry');
+    assert.ok(geoLineage.includes('geo-exp'));
+    assert.ok(!geoLineage.includes('algo-exp'));
+
+    const algoLineage = exportExperimentLineage(db, 'algorithm');
+    assert.ok(algoLineage.includes('algo-exp'));
+    assert.ok(!algoLineage.includes('geo-exp'));
+  });
+
+  it('truncates at maxLength', () => {
+    const exp = createExperiment(db, 'big-exp', 'exp/001-big', 'Big test', 'big', null);
+    // Insert enough data to exceed a small limit
+    for (let i = 0; i < 50; i++) {
+      insertDecision(db, exp.id, `Decision ${i}: ${'x'.repeat(100)}`, 'judgment', `Justification ${i}`);
+    }
+    const lineage = exportExperimentLineage(db, 'big', 500);
+    assert.ok(lineage.length <= 600); // some slack for truncation marker
+    assert.ok(lineage.includes('LINEAGE TRUNCATED'));
+  });
+
+  it('returns empty string for no experiments', () => {
+    const lineage = exportExperimentLineage(db, 'nonexistent');
+    assert.equal(lineage, '');
+  });
+});
+
+describe('exportForCompressor() limit', () => {
+  it('defaults to 50000 character limit', () => {
+    // Just verify it returns a string (the default limit is now 50K)
+    const result = exportForCompressor(db);
+    assert.ok(typeof result === 'string');
   });
 });
