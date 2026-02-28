@@ -5,6 +5,7 @@ import type { HookCallback, HookCallbackMatcher, HookEvent, HookJSONOutput } fro
 import type { AgentDefinition, AgentResult, AgentContext, StructuredOutput } from './types.js';
 import { extractStructuredData, validateForRole } from './parse.js';
 import { findProjectRoot } from '../db/connection.js';
+import { DIM, RESET, CYAN } from '../output/format.js';
 
 /**
  * Load an agent definition from .majlis/agents/{role}.md
@@ -473,75 +474,6 @@ export async function spawnSynthesiser(
   // (it never outputs <!-- majlis-json --> reliably, wasting a Haiku call).
   return { output: markdown, structured: { guidance: markdown }, truncated, extractionTier: null };
 }
-
-/**
- * Spawn a recovery agent to clean up after a truncated agent run.
- * Reads the partial output, the experiment doc, and writes a clean
- * experiment doc with whatever is salvageable. Minimal turns, Haiku model.
- */
-export async function spawnRecovery(
-  role: string,
-  partialOutput: string,
-  context: AgentContext,
-  projectRoot?: string,
-): Promise<void> {
-  const root = projectRoot ?? findProjectRoot() ?? process.cwd();
-  const expSlug = context.experiment?.slug ?? 'unknown';
-
-  console.log(`[recovery] Cleaning up after truncated ${role} for ${expSlug}...`);
-
-  const expDocPath = path.join(root, 'docs', 'experiments',
-    `${String(context.experiment?.id ?? 0).padStart(3, '0')}-${expSlug}.md`);
-
-  // Read the experiment doc template for structure reference
-  const templatePath = path.join(root, 'docs', 'experiments', '_TEMPLATE.md');
-  const template = fs.existsSync(templatePath) ? fs.readFileSync(templatePath, 'utf-8') : '';
-
-  // Read the current experiment doc (may have been partially edited by truncated agent)
-  const currentDoc = fs.existsSync(expDocPath) ? fs.readFileSync(expDocPath, 'utf-8') : '';
-
-  const prompt = `The ${role} agent was truncated (hit max turns) while working on experiment "${expSlug}".
-
-Here is the partial agent output (reasoning + tool calls):
-<partial_output>
-${partialOutput.slice(-3000)}
-</partial_output>
-
-Here is the current experiment doc:
-<current_doc>
-${currentDoc}
-</current_doc>
-
-Here is the template that the experiment doc should follow:
-<template>
-${template}
-</template>
-
-Your job: Write a CLEAN experiment doc to ${expDocPath} using the Write tool.
-- Keep any valid content from the current doc
-- Fill in what you can infer from the partial output
-- Mark incomplete sections with "[TRUNCATED — ${role} did not finish]"
-- The doc MUST have the <!-- majlis-json --> block, even if decisions are empty
-- Do NOT include agent reasoning or thinking — only structured experiment content
-- Be concise. This is cleanup, not new work.`;
-
-  const { text: _markdown } = await runQuery({
-    prompt,
-    model: 'haiku',
-    tools: ['Read', 'Write'],
-    systemPrompt: `You are a Recovery Agent. You clean up experiment docs after truncated agent runs. Write clean, structured docs. Never include agent reasoning or monologue.`,
-    cwd: root,
-    maxTurns: 5,
-    label: 'recovery',
-    role: 'recovery',
-  });
-
-  console.log(`[recovery] Cleanup complete for ${expSlug}.`);
-}
-
-const DIM = '\x1b[2m';
-const RESET = '\x1b[0m';
-const CYAN = '\x1b[36m';
 
 /**
  * Run a Claude Agent SDK query and collect the text output.

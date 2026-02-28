@@ -95,15 +95,18 @@ export function validateProject(checks: {
   return results;
 }
 
+// Local NO_COLOR gate — shared is independent of majlis, no cross-package import.
+const _useColor = !process.env.NO_COLOR && (process.stderr?.isTTY !== false);
+
 /**
  * Format validation results for terminal output.
  */
 export function formatValidation(checks: ValidationCheck[]): string {
   const lines: string[] = [];
   for (const c of checks) {
-    const icon = c.status === 'pass' ? '\x1b[32m✓\x1b[0m'
-               : c.status === 'warn' ? '\x1b[33m⚠\x1b[0m'
-               : '\x1b[31m✗\x1b[0m';
+    const icon = c.status === 'pass' ? (_useColor ? '\x1b[32m✓\x1b[0m' : '✓')
+               : c.status === 'warn' ? (_useColor ? '\x1b[33m⚠\x1b[0m' : '⚠')
+               : (_useColor ? '\x1b[31m✗\x1b[0m' : '✗');
     lines.push(`  ${icon} ${c.label}: ${c.detail}`);
   }
   return lines.join('\n');

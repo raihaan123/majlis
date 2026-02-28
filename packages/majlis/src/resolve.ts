@@ -316,7 +316,7 @@ function gitMerge(branch: string, cwd: string): void {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (err) {
-    console.warn(`[majlis] Git merge of ${branch} failed — you may need to merge manually.`);
+    fmt.warn(`Git merge of ${branch} failed — you may need to merge manually.`);
   }
 }
 
@@ -350,7 +350,7 @@ function gitRevert(branch: string, cwd: string): void {
       }
     }
   } catch {
-    console.warn(`[majlis] Could not switch away from ${branch} — you may need to do this manually.`);
+    fmt.warn(`Could not switch away from ${branch} — you may need to do this manually.`);
   }
 }
 

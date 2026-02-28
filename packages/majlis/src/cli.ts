@@ -2,6 +2,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as fmt from './output/format.js';
 
 const VERSION = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'),
@@ -15,7 +16,7 @@ async function main(): Promise<void> {
     if (sigintCount >= 2) process.exit(130);
     const { requestShutdown } = require('./shutdown.js');
     requestShutdown();
-    console.error('\n\x1b[33m[majlis] Interrupt received. Finishing current step...\x1b[0m');
+    fmt.warn('Interrupt received. Finishing current step...');
   });
 
   const args = process.argv.slice(2);
@@ -159,7 +160,7 @@ async function main(): Promise<void> {
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`\x1b[31m[majlis] Error: ${msg}\x1b[0m`);
+    fmt.error(`Error: ${msg}`);
     process.exit(1);
   }
 }

@@ -46,6 +46,8 @@ npm test             # runs tests in both consumer packages
 - **Output provenance tracking:** `extractStructuredData` returns `{ data, tier }` — tier 1 (JSON), 2 (regex), 3 (Haiku). Tier 3 triggers a provenance warning to the verifier (Tradition 3: chain provenance, Tradition 15: Tajwid distortion flagging).
 - **Extended write guards:** Builder and verifier are blocked from modifying `.claude/` and `.majlis/agents/` directories (Tradition 12: Adab al-Bahth — agents must not modify their own instructions).
 - **Swarm rebase on conflict:** Merge conflicts trigger rebase + gate re-verification. If gates hold, fast-forward merge; if violated, manual intervention required (Tradition 9: 'Ilm al-Ikhtilaf — factual disagreement resolved mechanically).
+- **Truncation recovery via extraction:** When a builder is truncated (hits max turns), the framework runs `extractStructuredData` on the full truncated output instead of spawning a separate recovery agent. If a `<!-- majlis-json -->` block is found, the build proceeds normally; otherwise, the tail of the output is stored as guidance and the experiment stays at `building` (Tradition 3: use the strongest available chain, not a weaker intermediary).
+- **Centralized ANSI output:** All terminal formatting goes through `src/output/format.ts`. Supports `NO_COLOR` env var and TTY detection. `shared/validation.ts` has its own local `NO_COLOR` gate (no cross-package dependency).
 
 ## Canonical Reference
 - PRD: See `FOUNDATIONS.md` for intellectual principles.

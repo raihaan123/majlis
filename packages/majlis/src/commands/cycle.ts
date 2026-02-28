@@ -32,7 +32,8 @@ import {
 } from '../db/queries.js';
 import { transition, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
-import { spawnAgent, spawnRecovery } from '../agents/spawn.js';
+import { spawnAgent } from '../agents/spawn.js';
+import { extractStructuredData } from '../agents/parse.js';
 import { resolve as resolveExperiment } from '../resolve.js';
 import type { Experiment, Doubt } from '../types.js';
 import type { StructuredOutput } from '../agents/types.js';
@@ -283,12 +284,79 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
 
   if (result.truncated && !result.structured) {
     // Builder hit max turns without producing structured output.
-    // Run recovery agent to clean up the experiment doc, then stay at 'building'.
+    // Try extractStructuredData on the full truncated output — the 3-tier parser
+    // may find a <!-- majlis-json --> block buried before the truncation point.
     fmt.warn(`Builder was truncated (hit max turns) without producing structured output.`);
-    await spawnRecovery('builder', result.output, {
-      experiment: { id: exp.id, slug: exp.slug, hypothesis: exp.hypothesis, status: 'building', sub_type: exp.sub_type, builder_guidance: null },
-    }, root);
-    fmt.warn(`Experiment stays at 'building'. Run \`majlis build\` to retry or \`majlis revert\` to abandon.`);
+    const recovery = await extractStructuredData('builder', result.output);
+
+    if (recovery.data && !recovery.data.abandon) {
+      // Recovered structured data from the truncated output
+      fmt.info(`Recovered structured output from truncated builder (tier ${recovery.tier}).`);
+      ingestStructuredOutput(db, exp.id, recovery.data);
+
+      // Run build gate if configured (same as normal path)
+      if (config.build?.pre_measure) {
+        try {
+          const [cmd, ...cmdArgs] = config.build.pre_measure.split(/\s+/);
+          execFileSync(cmd, cmdArgs, {
+            cwd: root, encoding: 'utf-8', timeout: 30_000,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          storeBuilderGuidance(db, exp.id,
+            `Build verification failed after truncated recovery.\nError: ${errMsg.slice(0, 500)}`);
+          fmt.warn(`Build verification failed for ${exp.slug}. Staying at 'building'.`);
+          return;
+        }
+      }
+
+      // Capture post-build metrics
+      if (config.metrics?.command) {
+        try {
+          const output = execSync(config.metrics.command, {
+            cwd: root, encoding: 'utf-8', timeout: 60_000,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          }).trim();
+          const parsed = parseMetricsOutput(output);
+          for (const m of parsed) {
+            insertMetric(db, exp.id, 'after', m.fixture, m.metric_name, m.metric_value);
+          }
+          if (parsed.length > 0) fmt.info(`Captured ${parsed.length} post-build metric(s).`);
+        } catch { /* non-fatal */ }
+      }
+
+      gitCommitBuild(exp, root);
+
+      // Provenance warning for tier 3 (same as normal path)
+      if (recovery.tier === 3) {
+        fmt.warn(`Builder output extracted via Haiku (tier 3). Data provenance degraded.`);
+        const existing = getBuilderGuidance(db, exp.id) ?? '';
+        storeBuilderGuidance(db, exp.id,
+          existing + '\n[PROVENANCE WARNING] Builder structured output was reconstructed by a secondary model (tier 3). Treat reported decisions with additional scrutiny.');
+      }
+
+      updateExperimentStatus(db, exp.id, 'built');
+      fmt.success(`Build complete for ${exp.slug} (recovered from truncation). Run \`majlis doubt\` or \`majlis challenge\` next.`);
+
+    } else if (recovery.data?.abandon) {
+      // Truncated but had an abandon block — honor it
+      insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug,
+        recovery.data.abandon.reason,
+        recovery.data.abandon.structural_constraint,
+        exp.sub_type, 'structural');
+      adminTransitionAndPersist(db, exp.id, 'building' as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
+      fmt.info(`Builder abandoned ${exp.slug} (recovered from truncation): ${recovery.data.abandon.reason}`);
+
+    } else {
+      // No structured data found — extract guidance from tail of output
+      const tail = result.output.slice(-2000).trim();
+      if (tail) {
+        storeBuilderGuidance(db, exp.id,
+          `Builder was truncated. Last ~2000 chars of output:\n${tail}`);
+      }
+      fmt.warn(`Experiment stays at 'building'. Run \`majlis build\` to retry or \`majlis revert\` to abandon.`);
+    }
   } else {
     // Fix #3: Build verification gate — Tradition 3 (Hadith): weak link invalidates chain
     // Tradition 15 (Tajwid): broken code is a distortion of the builder's intent

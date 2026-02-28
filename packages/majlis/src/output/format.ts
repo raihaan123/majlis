@@ -1,14 +1,18 @@
-// Raw ANSI codes — no chalk dependency
+// Raw ANSI codes — no chalk dependency.
+// NO_COLOR spec (https://no-color.org/) + TTY detection.
+// When either condition is met, ALL ANSI codes are suppressed (not just colors).
+const useColor = !process.env.NO_COLOR && process.stderr.isTTY !== false;
 
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const RED = '\x1b[31m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const BLUE = '\x1b[34m';
-const CYAN = '\x1b[36m';
-const WHITE = '\x1b[37m';
+const RESET  = useColor ? '\x1b[0m'  : '';
+const BOLD   = useColor ? '\x1b[1m'  : '';
+const DIM    = useColor ? '\x1b[2m'  : '';
+const RED    = useColor ? '\x1b[31m' : '';
+const GREEN  = useColor ? '\x1b[32m' : '';
+const YELLOW = useColor ? '\x1b[33m' : '';
+const BLUE   = useColor ? '\x1b[34m' : '';
+const CYAN   = useColor ? '\x1b[36m' : '';
+
+export { DIM, RESET, CYAN };
 
 export function bold(s: string): string { return `${BOLD}${s}${RESET}`; }
 export function dim(s: string): string { return `${DIM}${s}${RESET}`; }
@@ -78,7 +82,7 @@ export function table(headers: string[], rows: string[][]): string {
   return [bold(headerLine), separator, ...bodyLines].join('\n');
 }
 
-function stripAnsi(s: string): string {
+export function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
@@ -101,6 +105,13 @@ export function warn(msg: string): void {
  */
 export function info(msg: string): void {
   console.log(`${cyan('[majlis]')} ${msg}`);
+}
+
+/**
+ * Print an error message (to stderr).
+ */
+export function error(msg: string): void {
+  console.error(`${red('[majlis]')} ${msg}`);
 }
 
 /**
