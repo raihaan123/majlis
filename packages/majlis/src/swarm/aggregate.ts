@@ -43,14 +43,17 @@ export function importExperimentFromWorktree(
   // Insert experiment into target (new auto-increment ID, slug stays same)
   const insertExp = targetDb.prepare(`
     INSERT INTO experiments (slug, branch, status, classification_ref, sub_type,
-      hypothesis, builder_guidance, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      hypothesis, builder_guidance, depends_on, context_files,
+      gate_rejection_reason, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = insertExp.run(
     sourceExp.slug, sourceExp.branch, sourceExp.status,
     sourceExp.classification_ref, sourceExp.sub_type,
     sourceExp.hypothesis, sourceExp.builder_guidance,
+    sourceExp.depends_on ?? null, sourceExp.context_files ?? null,
+    sourceExp.gate_rejection_reason ?? null,
     sourceExp.created_at, sourceExp.updated_at,
   );
   const targetId = result.lastInsertRowid as number;

@@ -130,11 +130,11 @@ export function determineNextStep(
     }
   }
 
-  // building → advance to built
+  // building → re-run the builder (self-loop triggers cycle('build')).
+  // The builder itself transitions to 'built' when done.
+  // This handles both first builds and cycle-backs from weak verification.
   if (status === ExperimentStatus.BUILDING) {
-    return valid.includes(ExperimentStatus.BUILT)
-      ? ExperimentStatus.BUILT
-      : valid[0];
+    return ExperimentStatus.BUILDING;
   }
 
   // scouted → advance to verifying
@@ -148,6 +148,14 @@ export function determineNextStep(
   if (status === ExperimentStatus.VERIFIED) {
     return valid.includes(ExperimentStatus.RESOLVED)
       ? ExperimentStatus.RESOLVED
+      : valid[0];
+  }
+
+  // resolved → handled by resolve.ts internally; if we reach here,
+  // advance to compress (the next session-level step)
+  if (status === ExperimentStatus.RESOLVED) {
+    return valid.includes(ExperimentStatus.COMPRESSED)
+      ? ExperimentStatus.COMPRESSED
       : valid[0];
   }
 

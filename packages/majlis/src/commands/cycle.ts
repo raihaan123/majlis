@@ -18,6 +18,7 @@ import {
   listStructuralDeadEndsBySubType,
   getBuilderGuidance,
   storeBuilderGuidance,
+  storeGateRejection,
   exportForCompressor,
   insertDecision,
   insertDoubt,
@@ -39,7 +40,7 @@ import type { Experiment, Doubt } from '../types.js';
 import type { StructuredOutput } from '../agents/types.js';
 import { loadConfig, readFileOrEmpty, truncateContext, CONTEXT_LIMITS } from '../config.js';
 import { parseMetricsOutput, compareMetrics } from '../metrics.js';
-import { autoCommit } from '../git.js';
+import { autoCommit, handleDeadEndGit } from '../git.js';
 import * as fmt from '../output/format.js';
 
 export async function cycle(step: string, args: string[]): Promise<void> {
@@ -47,6 +48,10 @@ export async function cycle(step: string, args: string[]): Promise<void> {
   if (!root) throw new Error('Not in a Majlis project. Run `majlis init` first.');
 
   const db = getDb(root);
+
+  // Compress is session-level — no active experiment required
+  if (step === 'compress') return doCompress(db, root);
+
   const exp = resolveExperimentArg(db, args);
 
   switch (step) {
@@ -62,8 +67,6 @@ export async function cycle(step: string, args: string[]): Promise<void> {
       return doVerify(db, exp, root);
     case 'gate':
       return doGate(db, exp, root);
-    case 'compress':
-      return doCompress(db, root);
   }
 }
 
@@ -159,13 +162,14 @@ async function doGate(db: ReturnType<typeof getDb>, exp: Experiment, root: strin
   const reason = result.structured?.reason ?? '';
 
   if (decision === 'reject') {
-    // Fix #5B: Gatekeeper reject → DEAD_END
-    // Tradition 10 (Maqasid): procedure over purpose wastes a full cycle on a known-bad hypothesis
-    // Dead-end is 'procedural' — doesn't block future approaches on same sub-type
-    insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug,
-      reason, `Gate rejected: ${reason}`, exp.sub_type, 'procedural');
-    adminTransitionAndPersist(db, exp.id, 'gated' as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
-    fmt.warn(`Gate REJECTED for ${exp.slug}: ${reason}. Dead-ended.`);
+    // Gate rejection pauses the experiment instead of auto-killing it.
+    // The experiment stays at 'gated' with a rejection reason stored.
+    // User can: `majlis next --override-gate` to proceed, or `majlis revert` to abandon.
+    // Autonomous mode (run.ts) auto-dead-ends gate rejections since there's no human to dispute.
+    updateExperimentStatus(db, exp.id, 'gated');
+    storeGateRejection(db, exp.id, reason);
+    fmt.warn(`Gate REJECTED for ${exp.slug}: ${reason}`);
+    fmt.info('Run `majlis next --override-gate` to proceed anyway, or `majlis revert` to abandon.');
     return;
   } else {
     if (decision === 'flag') {
@@ -234,6 +238,7 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
     }
   }
 
+  taskPrompt += `\n\nYour experiment doc: ${expDocRelPath(exp)}`;
   taskPrompt += '\n\nNote: The framework captures metrics automatically. Do NOT claim specific numbers unless quoting framework output.';
 
   // Load experiment-scoped context files (Tradition 13: Ijtihad)
@@ -278,6 +283,7 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
       result.structured.abandon.structural_constraint,
       exp.sub_type, 'structural');
     adminTransitionAndPersist(db, exp.id, 'building' as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
+    handleDeadEndGit(exp, root);
     fmt.info(`Builder abandoned ${exp.slug}: ${result.structured.abandon.reason}`);
     return;
   }
@@ -346,6 +352,7 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
         recovery.data.abandon.structural_constraint,
         exp.sub_type, 'structural');
       adminTransitionAndPersist(db, exp.id, 'building' as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
+      handleDeadEndGit(exp, root);
       fmt.info(`Builder abandoned ${exp.slug} (recovered from truncation): ${recovery.data.abandon.reason}`);
 
     } else {
@@ -456,8 +463,7 @@ async function doDoubt(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
   transition(exp.status as ExperimentStatus, ExperimentStatus.DOUBTED);
 
   // Read the builder's experiment doc (the artifact, NOT reasoning chain — Tradition 3)
-  const paddedNum = String(exp.id).padStart(3, '0');
-  const expDocPath = path.join(root, 'docs', 'experiments', `${paddedNum}-${exp.slug}.md`);
+  const expDocPath = path.join(root, expDocRelPath(exp));
   const experimentDoc = truncateContext(readFileOrEmpty(expDocPath), CONTEXT_LIMITS.experimentDoc);
 
   // Read synthesis for structural context
@@ -764,6 +770,13 @@ function loadExperimentContext(exp: Experiment, root: string): string {
     }
   }
   return sections.join('\n\n');
+}
+
+/**
+ * Relative path to an experiment's doc file: docs/experiments/{NNN}-{slug}.md
+ */
+export function expDocRelPath(exp: Experiment): string {
+  return `docs/experiments/${String(exp.id).padStart(3, '0')}-${exp.slug}.md`;
 }
 
 function resolveExperimentArg(db: ReturnType<typeof getDb>, args: string[]): Experiment {

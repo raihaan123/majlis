@@ -14,12 +14,12 @@ import {
 import { isTerminal, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
 import { next } from './next.js';
-import { cycle } from './cycle.js';
+import { cycle, expDocRelPath } from './cycle.js';
 import { spawnSynthesiser, generateSlug } from '../agents/spawn.js';
 import type { MajlisConfig, Experiment } from '../types.js';
 import { loadConfig, readFileOrEmpty, readLatestDiagnosis, truncateContext, CONTEXT_LIMITS } from '../config.js';
 import { isShutdownRequested } from '../shutdown.js';
-import { autoCommit } from '../git.js';
+import { autoCommit, handleDeadEndGit } from '../git.js';
 import * as fmt from '../output/format.js';
 
 /**
@@ -114,6 +114,20 @@ export async function run(args: string[]): Promise<void> {
     try {
       await next([exp.slug], false);
       consecutiveFailures = 0;
+
+      // In autonomous mode, gate rejection has no human to dispute — auto-dead-end
+      const afterStep = getExperimentBySlug(db, exp.slug);
+      if (afterStep?.gate_rejection_reason) {
+        fmt.warn(`Gate rejected in autonomous mode: ${afterStep.gate_rejection_reason}. Dead-ending.`);
+        insertDeadEnd(db, afterStep.id, afterStep.hypothesis ?? afterStep.slug,
+          afterStep.gate_rejection_reason,
+          `Gate rejected: ${afterStep.gate_rejection_reason}`,
+          afterStep.sub_type, 'procedural');
+        adminTransitionAndPersist(db, afterStep.id, afterStep.status as ExperimentStatus,
+          ExperimentStatus.DEAD_END, 'revert');
+        handleDeadEndGit(afterStep, root);
+        continue;
+      }
     } catch (err) {
       consecutiveFailures++;
       const message = err instanceof Error ? err.message : String(err);
@@ -122,6 +136,7 @@ export async function run(args: string[]): Promise<void> {
         insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug, message,
           `Process failure: ${message}`, exp.sub_type, 'procedural');
         adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'error_recovery');
+        handleDeadEndGit(exp, root);
       } catch (innerErr) {
         const innerMsg = innerErr instanceof Error ? innerErr.message : String(innerErr);
         fmt.warn(`Could not record dead-end: ${innerMsg}`);
@@ -299,7 +314,9 @@ async function createNewExperiment(
   adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.REFRAMED, 'bootstrap');
   exp.status = 'reframed';
 
-  // Create experiment log from template
+  // Create experiment log from template — use exp.id (not COUNT+1) so the path
+  // matches expDocRelPath() which the builder, doubter, and verifier all use.
+  const docRelPath = expDocRelPath(exp);
   const docsDir = path.join(root, 'docs', 'experiments');
   const templatePath = path.join(docsDir, '_TEMPLATE.md');
   if (fs.existsSync(templatePath)) {
@@ -311,9 +328,9 @@ async function createNewExperiment(
       .replace(/\{\{status\}\}/g, 'classified')
       .replace(/\{\{sub_type\}\}/g, 'unclassified')
       .replace(/\{\{date\}\}/g, new Date().toISOString().split('T')[0]);
-    const logPath = path.join(docsDir, `${paddedNum}-${finalSlug}.md`);
+    const logPath = path.join(root, docRelPath);
     fs.writeFileSync(logPath, logContent);
-    fmt.info(`Created experiment log: docs/experiments/${paddedNum}-${finalSlug}.md`);
+    fmt.info(`Created experiment log: ${docRelPath}`);
   }
 
   return exp;

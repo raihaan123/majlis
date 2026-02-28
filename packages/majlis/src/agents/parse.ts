@@ -147,6 +147,21 @@ export function extractViaPatterns(role: string, markdown: string): StructuredOu
   }
   if (doubts.length > 0) result.doubts = doubts;
 
+  // Tier 2 postmortem detection
+  if (role === 'postmortem') {
+    // Pattern: WHY FAILED: ... STRUCTURAL CONSTRAINT: ... CATEGORY: ...
+    const pmPattern = /(?:WHY\s*FAILED|Why\s*Failed|Failure)\s*[:=]\s*(.+?)(?:\n|$)[\s\S]*?(?:STRUCTURAL\s*CONSTRAINT|Structural\s*Constraint|Constraint)\s*[:=]\s*(.+?)(?:\n|$)/im;
+    const pmMatch = markdown.match(pmPattern);
+    if (pmMatch) {
+      const categoryMatch = markdown.match(/(?:CATEGORY|Category)\s*[:=]\s*(structural|procedural)/im);
+      result.postmortem = {
+        why_failed: pmMatch[1].trim(),
+        structural_constraint: pmMatch[2].trim(),
+        category: (categoryMatch?.[1]?.toLowerCase() as 'structural' | 'procedural') ?? 'procedural',
+      };
+    }
+  }
+
   // Tier 2 abandon detection (builder only) — Tradition 13 (Ijtihad)
   if (role === 'builder') {
     const abandonPattern = /\[ABANDON\]\s*(.+?)(?:\n|$)[\s\S]*?(?:structural.?constraint|Constraint|CONSTRAINT)\s*[:=]\s*(.+?)(?:\n|$)/im;
@@ -223,7 +238,8 @@ function hasData(output: StructuredOutput): boolean {
     output.compression_report ||
     output.gate_decision ||
     output.diagnosis ||
-    output.abandon
+    output.abandon ||
+    output.postmortem
   );
 }
 

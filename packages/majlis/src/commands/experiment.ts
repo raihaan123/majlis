@@ -7,12 +7,16 @@ import {
   getExperimentBySlug,
   getLatestExperiment,
   insertDeadEnd,
+  clearGateRejection,
+  listStructuralDeadEnds,
+  listStructuralDeadEndsBySubType,
 } from '../db/queries.js';
 import { adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
-import { loadConfig, getFlagValue } from '../config.js';
-import { generateSlug } from '../agents/spawn.js';
-import { autoCommit } from '../git.js';
+import { loadConfig, getFlagValue, readFileOrEmpty, truncateContext, CONTEXT_LIMITS } from '../config.js';
+import { generateSlug, spawnAgent } from '../agents/spawn.js';
+import { autoCommit, handleDeadEndGit } from '../git.js';
+import { expDocRelPath } from './cycle.js';
 import * as fmt from '../output/format.js';
 
 export async function newExperiment(args: string[]): Promise<void> {
@@ -28,11 +32,17 @@ export async function newExperiment(args: string[]): Promise<void> {
   const config = loadConfig(root);
 
   // Use explicit --slug if provided, otherwise generate via Haiku
-  const slug = getFlagValue(args, '--slug') ?? await generateSlug(hypothesis, root);
+  let slug = getFlagValue(args, '--slug') ?? await generateSlug(hypothesis, root);
 
-  // Check for duplicates
-  if (getExperimentBySlug(db, slug)) {
-    throw new Error(`Experiment with slug "${slug}" already exists.`);
+  // Dedup: append -2, -3, etc. if slug already exists (e.g., dead-ended experiment reused same slug)
+  let attempt = 0;
+  while (getExperimentBySlug(db, slug + (attempt ? `-${attempt}` : ''))) {
+    attempt++;
+  }
+  if (attempt > 0) {
+    const original = slug;
+    slug = `${slug}-${attempt}`;
+    fmt.info(`Slug "${original}" already exists, using "${slug}"`);
   }
 
   // Determine experiment number
@@ -75,7 +85,9 @@ export async function newExperiment(args: string[]): Promise<void> {
   }
   fmt.success(`Created experiment #${exp.id}: ${exp.slug}`);
 
-  // Create experiment log from template
+  // Create experiment log from template — use exp.id (not COUNT+1) so the path
+  // matches expDocRelPath() which the builder, doubter, and verifier all use.
+  const docRelPath = expDocRelPath(exp);
   const docsDir = path.join(root, 'docs', 'experiments');
   const templatePath = path.join(docsDir, '_TEMPLATE.md');
   if (fs.existsSync(templatePath)) {
@@ -87,9 +99,9 @@ export async function newExperiment(args: string[]): Promise<void> {
       .replace(/\{\{status\}\}/g, 'classified')
       .replace(/\{\{sub_type\}\}/g, subType ?? 'unclassified')
       .replace(/\{\{date\}\}/g, new Date().toISOString().split('T')[0]);
-    const logPath = path.join(docsDir, `${paddedNum}-${slug}.md`);
+    const logPath = path.join(root, docRelPath);
     fs.writeFileSync(logPath, logContent);
-    fmt.info(`Created experiment log: docs/experiments/${paddedNum}-${slug}.md`);
+    fmt.info(`Created experiment log: ${docRelPath}`);
   }
 
   autoCommit(root, `new: ${slug}`);
@@ -123,50 +135,138 @@ export async function revert(args: string[]): Promise<void> {
     if (!exp) throw new Error('No active experiments to revert.');
   }
 
-  // Record dead-end
   const reason = getFlagValue(args, '--reason') ?? 'Manually reverted';
-  const category = args.includes('--structural') ? 'structural' as const : 'procedural' as const;
+  const contextArg = getFlagValue(args, '--context') ?? null;
+  const contextFiles = contextArg ? contextArg.split(',').map(f => f.trim()) : [];
 
-  insertDeadEnd(
-    db,
-    exp.id,
-    exp.hypothesis ?? exp.slug,
-    reason,
-    `Reverted: ${reason}`,
-    exp.sub_type,
-    category,
-  );
+  // ── Post-mortem agent (runs BEFORE git checkout so branch files are readable) ──
 
-  // Update status via validated admin transition
-  adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
+  let whyFailed = reason;
+  let structuralConstraint = `Reverted: ${reason}`;
+  let category: 'structural' | 'procedural' = args.includes('--structural') ? 'structural' : 'procedural';
 
-  // Handle git branch
   try {
-    const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd: root,
-      encoding: 'utf-8',
-    }).trim();
+    // Gather context for the post-mortem agent
+    const gitDiff = getGitDiff(root, exp.branch);
+    const synthesis = truncateContext(
+      readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'current.md')),
+      CONTEXT_LIMITS.synthesis,
+    );
+    const fragility = truncateContext(
+      readFileOrEmpty(path.join(root, 'docs', 'synthesis', 'fragility.md')),
+      CONTEXT_LIMITS.fragility,
+    );
+    const deadEnds = exp.sub_type
+      ? listStructuralDeadEndsBySubType(db, exp.sub_type)
+      : listStructuralDeadEnds(db);
 
-    if (currentBranch === exp.branch) {
-      try {
-        execFileSync('git', ['checkout', 'main'], {
-          cwd: root,
-          encoding: 'utf-8',
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
-      } catch {
-        execFileSync('git', ['checkout', 'master'], {
-          cwd: root,
-          encoding: 'utf-8',
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
+    // Build supplementary context from --context files
+    let supplementary = '';
+    if (contextFiles.length > 0) {
+      const sections: string[] = ['## Artifact Files (pointed to by --context)'];
+      for (const relPath of contextFiles) {
+        const absPath = path.join(root, relPath);
+        try {
+          const content = fs.readFileSync(absPath, 'utf-8');
+          sections.push(`### ${relPath}\n\`\`\`\n${content.slice(0, 12000)}\n\`\`\``);
+        } catch {
+          sections.push(`### ${relPath}\n*(file not found)*`);
+        }
       }
+      supplementary = sections.join('\n\n');
     }
-  } catch {
-    fmt.warn('Could not switch git branches — do this manually.');
+
+    // Assemble task prompt
+    let taskPrompt = `Analyze this reverted experiment and produce a structured dead-end record.\n\n`;
+    taskPrompt += `## Experiment\n- Slug: ${exp.slug}\n- Hypothesis: ${exp.hypothesis ?? '(none)'}\n`;
+    taskPrompt += `- Status at revert: ${exp.status}\n- Sub-type: ${exp.sub_type ?? '(none)'}\n\n`;
+    taskPrompt += `## User's Reason for Reverting\n${reason}\n\n`;
+    if (gitDiff) {
+      taskPrompt += `## Git Diff (branch vs main)\n\`\`\`diff\n${gitDiff.slice(0, 15000)}\n\`\`\`\n\n`;
+    }
+    if (supplementary) {
+      taskPrompt += `${supplementary}\n\n`;
+    }
+    taskPrompt += 'Produce a specific structural constraint. Include scope (what this applies to and does NOT apply to).';
+
+    fmt.info('Running post-mortem analysis...');
+    const result = await spawnAgent('postmortem', {
+      experiment: {
+        id: exp.id,
+        slug: exp.slug,
+        hypothesis: exp.hypothesis,
+        status: exp.status,
+        sub_type: exp.sub_type,
+        builder_guidance: null,
+      },
+      deadEnds: deadEnds.map(d => ({
+        approach: d.approach,
+        why_failed: d.why_failed,
+        structural_constraint: d.structural_constraint,
+      })),
+      fragility,
+      synthesis,
+      supplementaryContext: supplementary || undefined,
+      taskPrompt,
+    }, root);
+
+    // Use agent output if available, otherwise fall back to user's reason
+    if (result.structured?.postmortem) {
+      const pm = result.structured.postmortem;
+      whyFailed = pm.why_failed;
+      structuralConstraint = pm.structural_constraint;
+      category = pm.category;
+      fmt.success('Post-mortem analysis complete.');
+    } else {
+      fmt.warn('Post-mortem agent did not produce structured output. Using --reason text.');
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    fmt.warn(`Post-mortem agent failed: ${msg}. Using --reason text.`);
   }
 
-  fmt.info(`Experiment ${exp.slug} reverted to dead-end. Reason: ${reason}`);
+  // ── Record dead-end and transition ──
+
+  insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug,
+    whyFailed, structuralConstraint, exp.sub_type, category);
+
+  // Clear stale gate rejection reason before terminal transition
+  if (exp.gate_rejection_reason) clearGateRejection(db, exp.id);
+
+  adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
+
+  // Commit any builder changes and checkout main/master
+  handleDeadEndGit(exp, root);
+
+  fmt.info(`Experiment ${exp.slug} reverted to dead-end.`);
+  fmt.info(`Constraint: ${structuralConstraint.slice(0, 120)}${structuralConstraint.length > 120 ? '...' : ''}`);
+}
+
+/**
+ * Get git diff of experiment branch vs main.
+ * Uses three-dot diff to show changes introduced by the branch.
+ * Returns null if diff cannot be obtained.
+ */
+function getGitDiff(root: string, branch: string): string | null {
+  try {
+    return execFileSync('git', ['diff', `main...${branch}`, '--stat', '--patch'], {
+      cwd: root,
+      encoding: 'utf-8',
+      maxBuffer: 1024 * 1024,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    try {
+      return execFileSync('git', ['diff', `master...${branch}`, '--stat', '--patch'], {
+        cwd: root,
+        encoding: 'utf-8',
+        maxBuffer: 1024 * 1024,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+    } catch {
+      return null;
+    }
+  }
 }
 
 

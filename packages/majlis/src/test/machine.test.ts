@@ -16,6 +16,7 @@ function makeExp(overrides: Partial<Experiment> = {}): Experiment {
     builder_guidance: null,
     depends_on: null,
     context_files: null,
+    gate_rejection_reason: null,
     created_at: '2024-01-01',
     updated_at: '2024-01-01',
     ...overrides,
@@ -234,6 +235,13 @@ describe('determineNextStep()', () => {
   it('gated → building', () => {
     const exp = makeExp({ status: 'gated' });
     const valid = TRANSITIONS[ExperimentStatus.GATED];
+    const result = determineNextStep(exp, valid, false, false);
+    assert.equal(result, ExperimentStatus.BUILDING);
+  });
+
+  it('building → building (self-loop for cycle-back rebuild)', () => {
+    const exp = makeExp({ status: 'building' });
+    const valid = TRANSITIONS[ExperimentStatus.BUILDING];
     const result = determineNextStep(exp, valid, false, false);
     assert.equal(result, ExperimentStatus.BUILDING);
   });

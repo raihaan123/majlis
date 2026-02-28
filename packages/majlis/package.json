@@ -1,6 +1,6 @@
 {
   "name": "majlis",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "description": "Multi-agent workflow CLI for structured doubt, independent verification, and compressed knowledge",
   "bin": {
     "majlis": "./dist/cli.js"

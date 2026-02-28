@@ -38,6 +38,7 @@ export interface Experiment {
   builder_guidance: string | null;
   depends_on: string | null;       // slug of prerequisite experiment
   context_files: string | null;    // JSON array of relative file paths
+  gate_rejection_reason: string | null;  // set when gatekeeper rejects; cleared on override
   created_at: string;
   updated_at: string;
 }

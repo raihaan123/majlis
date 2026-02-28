@@ -98,6 +98,12 @@ export interface StructuredOutput {
     reason: string;
     structural_constraint: string;
   };
+  // Post-mortem analysis output
+  postmortem?: {
+    why_failed: string;
+    structural_constraint: string;
+    category: 'structural' | 'procedural';
+  };
 }
 
 export interface AgentContext {
@@ -175,6 +181,8 @@ export function getExtractionSchema(role: string): string {
       return '{"architecture": {"modules": ["string"], "entry_points": ["string"], "key_abstractions": ["string"], "dependency_graph": "string"}}';
     case 'toolsmith':
       return '{"toolsmith": {"metrics_command": "string|null", "build_command": "string|null", "test_command": "string|null", "test_framework": "string|null", "pre_measure": "string|null", "post_measure": "string|null", "fixtures": {}, "tracked": {}, "verification_output": "string", "issues": ["string"]}}';
+    case 'postmortem':
+      return '{"postmortem": {"why_failed": "string", "structural_constraint": "string", "category": "structural|procedural"}}';
     default:
       return EXTRACTION_SCHEMA;
   }
@@ -195,4 +203,5 @@ export const ROLE_REQUIRED_FIELDS: Record<string, string[]> = {
   diagnostician: ['diagnosis'],
   cartographer:  ['architecture'],
   toolsmith:     ['toolsmith'],
+  postmortem:    ['postmortem'],
 };

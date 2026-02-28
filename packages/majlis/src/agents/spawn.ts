@@ -55,11 +55,12 @@ const ROLE_MAX_TURNS: Record<string, number> = {
   diagnostician: 60,
   cartographer: 40,
   toolsmith: 30,
+  postmortem: 20,
 };
 
 /** Tool-use intervals at which to inject checkpoint grounding reminders. */
 const CHECKPOINT_INTERVAL: Record<string, number> = {
-  builder: 15,
+  builder: 12,
   verifier: 12,
   critic: 15,
   adversary: 15,
@@ -68,6 +69,7 @@ const CHECKPOINT_INTERVAL: Record<string, number> = {
   diagnostician: 20,
   cartographer: 12,
   toolsmith: 10,
+  postmortem: 8,
 };
 
 /**
@@ -79,11 +81,27 @@ function buildCheckpointMessage(role: string, toolUseCount: number, maxTurns: nu
   const header = `[MAJLIS CHECKPOINT — ~${approxTurn} of ${maxTurns} turns used]`;
 
   switch (role) {
-    case 'builder':
-      return `${header}\nReminder: ONE code change per cycle.\n` +
-        `- Have you run the benchmark? YES → document results + output JSON + STOP.\n` +
-        `- If NO → run it now, then wrap up.\n` +
-        `Do NOT start a second change or investigate unrelated failures.`;
+    case 'builder': {
+      if (toolUseCount <= 15) {
+        // Early phase — builder should be finishing reads, starting to code
+        return `${header}\nYou should be done reading by now.\n` +
+          `- Your experiment doc path is in the taskPrompt. Do NOT search for it.\n` +
+          `- Do NOT query SQLite, explore .majlis/, or glob broadly.\n` +
+          `- If you haven't started coding, START NOW.`;
+      } else if (toolUseCount <= 40) {
+        // Mid phase — should be coding or running benchmark
+        return `${header}\nONE code change per cycle.\n` +
+          `- Have you run the build/benchmark? YES → document results + output JSON + STOP.\n` +
+          `- If NO → finish your change and run it now.\n` +
+          `Do NOT start a second change or investigate unrelated failures.`;
+      } else {
+        // Late phase — MUST wrap up
+        return `${header}\nURGENT: You are running out of turns.\n` +
+          `1. Update the experiment doc with whatever results you have.\n` +
+          `2. Output the <!-- majlis-json --> block NOW.\n` +
+          `The framework CANNOT recover your work without structured output.`;
+      }
+    }
     case 'verifier':
       return `${header}\nAT MOST 3 diagnostic scripts total.\n` +
         `- If ≥3 scripts run → produce grades + output JSON now.\n` +
@@ -118,6 +136,10 @@ function buildCheckpointMessage(role: string, toolUseCount: number, maxTurns: nu
       return `${header}\nYou write ONLY to .majlis/scripts/. Verify toolchain, create metrics wrapper.\n` +
         `Phase 1 (1-10): verify toolchain. Phase 2 (11-25): create metrics.sh. Phase 3 (26-30): output config JSON.\n` +
         `If you are past turn 25, output your structured JSON NOW.`;
+    case 'postmortem':
+      return `${header}\nYou are READ-ONLY. Focus on the structural constraint.\n` +
+        `What does this experiment prove about the solution space?\n` +
+        `If you have enough context, output your postmortem JSON NOW.`;
     default:
       return `${header}\nCheck: is your core task done? If yes, wrap up and output JSON.`;
   }
@@ -245,6 +267,20 @@ function buildPreToolUseGuards(role: string, cwd: string): HookCallbackMatcher[]
       { matcher: 'Write', hooks: [writeGuard] },
       { matcher: 'Edit', hooks: [writeGuard] },
       { matcher: 'Bash', hooks: [bashGuard] },
+    ];
+  }
+
+  if (role === 'postmortem') {
+    // Post-mortem is fully read-only — block ALL writes
+    const blockWrite: HookCallback = async () => {
+      return {
+        decision: 'block' as const,
+        reason: 'Post-mortem agent is read-only. No file modifications allowed.',
+      };
+    };
+    return [
+      { matcher: 'Write', hooks: [blockWrite] },
+      { matcher: 'Edit', hooks: [blockWrite] },
     ];
   }
 

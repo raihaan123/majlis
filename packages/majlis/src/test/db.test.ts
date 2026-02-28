@@ -65,9 +65,9 @@ describe('Migrations', () => {
     ]);
   });
 
-  it('sets user_version to 6', () => {
+  it('sets user_version to 7', () => {
     const version = db.pragma('user_version', { simple: true });
-    assert.equal(version, 6);
+    assert.equal(version, 7);
   });
 
   it('has builder_guidance column on experiments', () => {
@@ -83,10 +83,16 @@ describe('Migrations', () => {
     assert.ok(colNames.includes('context_files'));
   });
 
+  it('has gate_rejection_reason column on experiments', () => {
+    const cols = db.prepare('PRAGMA table_info(experiments)').all() as Array<{ name: string }>;
+    const colNames = cols.map(c => c.name);
+    assert.ok(colNames.includes('gate_rejection_reason'));
+  });
+
   it('is idempotent', () => {
     const db2 = openTestDb();
     const version = db2.pragma('user_version', { simple: true });
-    assert.equal(version, 6);
+    assert.equal(version, 7);
   });
 });
 

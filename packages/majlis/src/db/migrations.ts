@@ -205,6 +205,13 @@ const migrations: Migration[] = [
       ALTER TABLE experiments ADD COLUMN context_files TEXT;
     `);
   },
+
+  // Migration 007: v6 → v7 — Gate rejection reason (pause instead of auto-kill)
+  (db) => {
+    db.exec(`
+      ALTER TABLE experiments ADD COLUMN gate_rejection_reason TEXT;
+    `);
+  },
 ];
 
 /**

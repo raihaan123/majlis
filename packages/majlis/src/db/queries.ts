@@ -81,6 +81,18 @@ export function getBuilderGuidance(db: Database.Database, experimentId: number):
   return row?.builder_guidance ?? null;
 }
 
+export function storeGateRejection(db: Database.Database, experimentId: number, reason: string): void {
+  db.prepare(`
+    UPDATE experiments SET gate_rejection_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(reason, experimentId);
+}
+
+export function clearGateRejection(db: Database.Database, experimentId: number): void {
+  db.prepare(`
+    UPDATE experiments SET gate_rejection_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(experimentId);
+}
+
 // ── Decisions ────────────────────────────────────────────────
 
 export function insertDecision(

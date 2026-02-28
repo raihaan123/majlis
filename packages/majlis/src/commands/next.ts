@@ -6,6 +6,7 @@ import {
   hasDoubts as dbHasDoubts,
   checkCircuitBreaker,
   insertDeadEnd,
+  clearGateRejection,
 } from '../db/queries.js';
 import { validNext, determineNextStep, isTerminal, transitionAndPersist, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
@@ -14,6 +15,7 @@ import type { MajlisConfig, Experiment } from '../types.js';
 import { loadConfig } from '../config.js';
 import { cycle, resolveCmd } from './cycle.js';
 import { audit } from './audit.js';
+import { handleDeadEndGit } from '../git.js';
 import * as fmt from '../output/format.js';
 
 export async function next(args: string[], isJson: boolean): Promise<void> {
@@ -37,11 +39,12 @@ export async function next(args: string[], isJson: boolean): Promise<void> {
   }
 
   const auto = args.includes('--auto');
+  const overrideGate = args.includes('--override-gate');
 
   if (auto) {
     await runAutoLoop(db, exp, config, root, isJson);
   } else {
-    await runNextStep(db, exp, config, root, isJson);
+    await runNextStep(db, exp, config, root, isJson, overrideGate);
   }
 }
 
@@ -51,6 +54,7 @@ async function runNextStep(
   config: MajlisConfig,
   root: string,
   isJson: boolean,
+  overrideGate: boolean = false,
 ): Promise<void> {
   const currentStatus = exp.status as ExperimentStatus;
   const valid = validNext(currentStatus);
@@ -72,9 +76,22 @@ async function runNextStep(
       `Sub-type ${exp.sub_type} exceeded ${config.cycle.circuit_breaker_threshold} failures`,
       exp.sub_type, 'procedural');
     adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'circuit_breaker');
+    handleDeadEndGit(exp, root);
     fmt.warn('Experiment dead-ended. Triggering Maqasid Check (purpose audit).');
     await audit([config.project?.objective ?? '']);
     return;
+  }
+
+  // Check gate rejection — require --override-gate to proceed past a rejected gate
+  if (exp.status === 'gated' && exp.gate_rejection_reason) {
+    if (overrideGate) {
+      clearGateRejection(db, exp.id);
+      fmt.info(`Gate override accepted for ${exp.slug}. Proceeding to build.`);
+    } else {
+      fmt.warn(`Gate rejected: ${exp.gate_rejection_reason}`);
+      fmt.info('Run `majlis next --override-gate` to proceed anyway, or `majlis revert` to abandon.');
+      return;
+    }
   }
 
   // Check compression timer
@@ -127,6 +144,13 @@ async function runAutoLoop(
     if (!freshExp) break;
     exp = freshExp;
 
+    // Check for gate rejection — auto mode has no human to dispute, stop the loop
+    if (exp.gate_rejection_reason) {
+      fmt.warn(`Gate rejected: ${exp.gate_rejection_reason}`);
+      fmt.info('Stopping auto mode. Use `majlis next --override-gate` or `majlis revert`.');
+      break;
+    }
+
     if (isTerminal(exp.status as ExperimentStatus)) {
       fmt.success(`Experiment ${exp.slug} reached terminal state: ${exp.status}`);
       break;
@@ -140,6 +164,7 @@ async function runAutoLoop(
         `Sub-type ${exp.sub_type} exceeded ${config.cycle.circuit_breaker_threshold} failures`,
         exp.sub_type, 'procedural');
       adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'circuit_breaker');
+      handleDeadEndGit(exp, root);
       await audit([config.project?.objective ?? '']);
       break;
     }
