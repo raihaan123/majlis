@@ -1,29 +1,185 @@
 # Majlis
 
-Structured multi-agent problem solving through doubt, verification, and compressed knowledge.
+**Structured multi-agent problem solving through doubt, verification, and compressed knowledge.**
+
+Standard AI coding agents are great at boilerplate, but terrible at novel engineering. They get stuck in loops, hallucinate fixes that break other things, forget context over time, and confidently optimise the wrong objectives.
+
+Majlis wraps Claude Code in a deterministic state machine. It forces AI agents into a rigorous scientific method: classify the problem, hypothesise a solution, build it, systematically doubt it, independently verify it, and compress what was learned into durable knowledge. Before code is merged, it must survive challenge, verification, and regression gates.
+
+**This is not for:** fixing syntax errors, standard API integration, boilerplate generation, or any problem where the answer is already known.
+
+**This is for:** novel algorithm development, mathematical proof exploration, complex system design where failure modes are unknown, and any problem where being confidently wrong is more expensive than being slow.
 
 ## Quick Start
 
+Majlis requires your project to have a deterministic test or metrics command. **Before scaffolding into an existing project**, have Claude read [READINESS.md](READINESS.md) — it's a step-by-step directive that walks through setting up a metrics command, identifying fixtures and gates, writing CLAUDE.md, and configuring tracked metrics.
+
+New project:
 ```bash
 npx create-majlis my-project && cd my-project
 majlis status
 ```
 
-Or add to an existing project:
-
+Existing project (after running through READINESS.md):
 ```bash
 npx create-majlis --init
+majlis status    # check readiness — all green?
 ```
 
-**Before integrating into an existing project**, have Claude read [READINESS.md](READINESS.md) first. It's a step-by-step directive that walks Claude through preparing your project — setting up a metrics command, identifying fixtures and gates, writing CLAUDE.md, and configuring tracked metrics. This ensures `majlis status` shows all green on day one.
+## The Developer Workflow
 
-## What This Is
+Majlis handles the management; you provide the direction.
 
-Majlis is a multi-agent workflow framework for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), designed for problems where nobody has found the answer before — algorithm discovery, novel engineering, mathematical research. It gives AI agents distinct roles with enforced boundaries so that what gets built also gets challenged, verified, and compressed into durable knowledge.
+**1. Declare your intent:**
+```bash
+majlis session start "Fixing the boundary collision bug"
+```
 
-**This is not for:** fixing syntax errors, standard API integration, boilerplate generation, or any problem where the answer is already known.
+**2. Propose a specific, testable hypothesis:**
+```bash
+majlis new "Use a bounding-box pre-filter to cull distant vertices" \
+  --sub-type collision \
+  --context docs/algorithms/spatial-hashing.md
+```
 
-**This is for:** novel algorithm development, mathematical proof exploration, complex system design where failure modes are unknown, and any problem where being confidently wrong is more expensive than being slow.
+**3. Let the Majlis debate:**
+```bash
+majlis next --auto
+```
+
+Behind the scenes, the framework runs a full cycle:
+
+- A **Gatekeeper** checks the hypothesis against dead-ends and stale references
+- A **Builder** writes the code and tags every decision with its evidence level
+- An **Adversary** constructs pathological inputs designed to break the approach
+- A **Critic** raises doubts backed by evidence
+- A **Verifier** runs your project's test suite and grades each component
+
+Then the system **resolves** deterministically:
+- **Sound** — merge
+- **Good** — merge, record gaps in the fragility map
+- **Weak** — cycle back with synthesised guidance for the builder
+- **Rejected** — dead-end it, record the structural constraint, revert
+
+No LLM decides the routing. The state machine does, based on grades and metrics. If a gate fixture regressed, the merge is blocked regardless of how good the verification grades look.
+
+**4. When the system warns you, compress:**
+```bash
+majlis compress
+```
+
+The compressor rewrites the project's institutional memory — shorter and denser. Dead-ends, fragility, synthesis. Context stays manageable across dozens of experiments.
+
+## Best Practices
+
+**Write testable hypotheses.** A hypothesis must be a single, focused architectural change. Don't say "Make it better" — say "Implement X to achieve Y." The gatekeeper rejects vague or overlapping scopes.
+
+**The metrics command is law.** The framework lives and dies by `metrics.command`. It runs automatically before and after every build. Keep tests fast and deterministic. If the command isn't wired up, agents fly blind and regression detection is disabled.
+
+**Protect the gate.** Define your critical test suites as `gate` fixtures in config. Majlis mechanically blocks any merge that regresses a gate — one weak link invalidates the chain, regardless of how good the rest looks.
+
+**Use dependencies for ordered problems.** If fixing problem B requires problem A to be solved first, use `--depends-on`. The state machine enforces the ordering — you can't start building until the dependency is merged.
+
+**Inject context, don't rely on discovery.** Use `--context` to point agents at the specific docs they need. A builder working on a spatial algorithm needs the algorithm docs, not the entire codebase. Scoped context beats hoping agents find the right files.
+
+**Trust the dead-ends.** When an experiment is rejected, the structural constraint gets recorded permanently. Future experiments on the same sub-type see it. Don't retry the same approach — the circuit breaker will trip after 3 failures and force a purpose audit.
+
+**Compress frequently.** Don't let the session context bloat. When `majlis status` warns you, run `majlis compress`. The compressor cross-references everything in the database, resolves contradictions, and rewrites the synthesis.
+
+## Core Concepts
+
+### The State Machine
+
+The CLI controls routing, not the LLM. Every experiment moves through a deterministic state machine:
+
+```
+CLASSIFY -> REFRAME -> GATE -> BUILD -> CHALLENGE -> DOUBT -> SCOUT -> VERIFY -> RESOLVE -> COMPRESS
+```
+
+Two transition paths enforce this:
+- `transition()` — normal flow, validated against the TRANSITIONS map
+- `adminTransition()` — operational moves (revert, circuit breaker, error recovery)
+
+No agent can skip a step or jump ahead. The state machine is the adab (rules of engagement).
+
+### The Roles
+
+| Role | Function | Model |
+|---|---|---|
+| **Builder** | Writes code, runs experiments, tags every decision | opus |
+| **Critic** | Challenges with evidence, produces doubt documents | opus |
+| **Adversary** | Constructs pathological inputs to break approaches | opus |
+| **Verifier** | Dual provenance + content checks, grades components | opus |
+| **Reframer** | Independently decomposes from scratch (never sees builder code) | opus |
+| **Compressor** | Compresses, cross-references, maintains dead-end registry | opus |
+| **Scout** | Searches externally for alternative approaches | opus |
+| **Gatekeeper** | Fast hypothesis quality check before building | sonnet |
+
+### The Evidence Hierarchy
+
+Every decision is tagged with its justification level. Stored as database columns, not prompt suggestions.
+
+| Level | Name | Overturn threshold |
+|---|---|---|
+| 1 | **Proof** | Error found in proof |
+| 2 | **Test** | Test shown insufficient |
+| 3a | **Strong Consensus** | New contradicting evidence |
+| 3b | **Consensus** | Any independent approach contradicts |
+| 4 | **Analogy** | Analogy shown structurally false |
+| 5 | **Judgment** | Any stronger source contradicts |
+
+### Regression Gates
+
+Fixtures flagged as `gate` block merge on regression regardless of verification grades. This is the frozen-downstream principle — your stable test suite must never get worse while you work on improvements.
+
+### Experiment Dependencies
+
+`--depends-on SLUG` blocks building until the prerequisite experiment is merged. For progressive problem decomposition — solve the foundation before building on top of it.
+
+### Scoped Context
+
+`--context file1,file2` injects domain-specific reference material into agent prompts. Different experiments need different knowledge; this ensures agents get the right docs for the right problem.
+
+## Configuration
+
+`.majlis/config.json`:
+
+```json
+{
+  "project": {
+    "name": "my-project",
+    "description": "...",
+    "objective": "What are we actually trying to achieve?"
+  },
+  "metrics": {
+    "command": "python scripts/benchmark.py --json",
+    "fixtures": {
+      "baseline_test": { "gate": true },
+      "target_test": {}
+    },
+    "tracked": {
+      "error_rate": { "direction": "lower_is_better" },
+      "accuracy": { "direction": "higher_is_better" },
+      "value_delta": { "direction": "closer_to_gt", "target": 0 }
+    }
+  },
+  "build": {
+    "pre_measure": "make build",
+    "post_measure": null
+  },
+  "cycle": {
+    "compression_interval": 5,
+    "circuit_breaker_threshold": 3,
+    "require_doubt_before_verify": true,
+    "require_challenge_before_verify": false,
+    "auto_baseline_on_new_experiment": true
+  }
+}
+```
+
+The metrics command must output JSON: `{ "fixtures": { "name": { "metric": value } } }`.
+
+Run `majlis status` to see which config fields are wired up and which need attention.
 
 ## Architecture
 
@@ -57,48 +213,15 @@ Three packages in a monorepo:
 +---------------------------------------------------------+
 ```
 
-## The Cycle
+## Claude Code Integration
 
-```
- 1. CLASSIFY   -> Taxonomy before solution (Al-Khwarizmi)
- 2. REFRAME    -> Independent decomposition (Al-Biruni)
- 3. GATE       -> Hypothesis quality check
- 4. BUILD      -> Write code with tagged decisions (Ijtihad)
- 5. CHALLENGE  -> Construct breaking inputs (Ibn al-Haytham)
- 6. DOUBT      -> Systematic challenge with evidence (Shukuk)
- 7. SCOUT      -> External search for alternatives (Rihla)
- 8. VERIFY     -> Provenance + content checks (Isnad + Matn)
- 9. RESOLVE    -> Route based on grades
-10. COMPRESS   -> Shorter and denser (Hifz)
-```
+Majlis integrates with Claude Code through:
 
-## Evidence Hierarchy
+- **Agents** (`.claude/agents/`) — Native agent discovery for each role
+- **Slash commands** (`.claude/commands/`) — `/classify`, `/doubt`, `/challenge`, `/verify`, `/reframe`, `/compress`, `/scout`, `/audit`
+- **Hooks** (`.claude/settings.json`) — Session start status, commit gates, subagent notifications
 
-Every decision is tagged with its justification level. Stored as database columns, not prompt suggestions.
-
-| Level | Name | Overturn threshold |
-|---|---|---|
-| 1 | **Proof** | Error found in proof |
-| 2 | **Test** | Test shown insufficient |
-| 3a | **Strong Consensus** | New contradicting evidence |
-| 3b | **Consensus** | Any independent approach contradicts |
-| 4 | **Analogy** | Analogy shown structurally false |
-| 5 | **Judgment** | Any stronger source contradicts |
-
-## Roles
-
-| Role | Function | Model |
-|---|---|---|
-| **Builder** | Writes code, runs experiments, tags every decision | opus |
-| **Critic** | Challenges with evidence, produces doubt documents | opus |
-| **Adversary** | Constructs pathological inputs to break approaches | opus |
-| **Verifier** | Dual provenance + content checks, grades components | opus |
-| **Reframer** | Independently decomposes from scratch (never sees builder code) | opus |
-| **Compressor** | Compresses, cross-references, maintains dead-end registry | opus |
-| **Scout** | Searches externally for alternative approaches | opus |
-| **Gatekeeper** | Fast hypothesis quality check before building | sonnet |
-
-## Commands
+## Command Reference
 
 ```
 Lifecycle:
@@ -153,74 +276,6 @@ Orchestration:
   run "goal"                 Autonomous orchestration until goal met
   swarm "goal" [--parallel N] Run N experiments in parallel worktrees
 ```
-
-## Resolution
-
-- **Sound** -> Merge
-- **Good** -> Merge + add gaps to fragility map
-- **Weak** -> Cycle back with synthesised guidance
-- **Rejected** -> Dead-end with structural constraint
-
-**Circuit breaker:** 3+ weak/rejected on same sub-type triggers a Maqasid Check (purpose audit).
-
-**Regression gates:** Fixtures flagged as `gate` block merge on regression regardless of verification grades.
-
-## Configuration
-
-`.majlis/config.json`:
-
-```json
-{
-  "project": {
-    "name": "my-project",
-    "description": "...",
-    "objective": "What are we actually trying to achieve?"
-  },
-  "metrics": {
-    "command": "python scripts/benchmark.py --json",
-    "fixtures": {
-      "baseline_test": { "gate": true },
-      "target_test": {}
-    },
-    "tracked": {
-      "error_rate": { "direction": "lower_is_better" },
-      "accuracy": { "direction": "higher_is_better" },
-      "value_delta": { "direction": "closer_to_gt", "target": 0 }
-    }
-  },
-  "build": {
-    "pre_measure": "make build",
-    "post_measure": null
-  },
-  "cycle": {
-    "compression_interval": 5,
-    "circuit_breaker_threshold": 3,
-    "require_doubt_before_verify": true,
-    "require_challenge_before_verify": false,
-    "auto_baseline_on_new_experiment": true
-  }
-}
-```
-
-The metrics command must output JSON: `{ "fixtures": { "name": { "metric": value } } }`.
-
-Run `majlis status` to see which config fields are wired up and what's missing.
-
-## Experiment Features
-
-- **Regression gates:** Gate fixtures block merge on regression regardless of verification grades. One weak link invalidates the chain.
-- **Dependencies:** `--depends-on SLUG` blocks building until the prerequisite experiment is merged. Ordered problem decomposition.
-- **Scoped context:** `--context file1,file2` injects domain-specific reference material into agent prompts. Agents get the right knowledge for the right experiment.
-- **Structured metric comparison:** The verifier receives typed comparison results with regression flags and gate markers, not raw numbers.
-- **Project readiness:** `majlis status` runs diagnostic checks and surfaces what's configured, what's missing, and what the consequences are.
-
-## Claude Code Integration
-
-Majlis integrates with Claude Code through:
-
-- **Agents** (`.claude/agents/`) — Native agent discovery for each role
-- **Slash commands** (`.claude/commands/`) — `/classify`, `/doubt`, `/challenge`, `/verify`, `/reframe`, `/compress`, `/scout`, `/audit`
-- **Hooks** (`.claude/settings.json`) — Session start status, commit gates, subagent notifications
 
 ## Philosophy
 
