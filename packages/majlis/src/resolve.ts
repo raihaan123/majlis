@@ -21,6 +21,60 @@ import { execSync, execFileSync } from 'node:child_process';
 import { autoCommit } from './git.js';
 import * as fmt from './output/format.js';
 
+/** Max chars for accumulated guidance. Oldest iterations truncated first. */
+const GUIDANCE_MAX_CHARS = 12_000;
+
+/**
+ * Accumulate guidance across iterations instead of overwriting.
+ * Each iteration gets a header; oldest iterations are truncated first
+ * to stay within GUIDANCE_MAX_CHARS.
+ */
+export function accumulateGuidance(existing: string | null, newGuidance: string): string {
+  // Find the highest existing iteration number (survives truncation)
+  const iterationNums = existing?.match(/### Iteration (\d+)/g)
+    ?.map(m => parseInt(m.replace('### Iteration ', ''), 10)) ?? [];
+  const maxExisting = iterationNums.length > 0 ? Math.max(...iterationNums) : 0;
+  const iterationNum = maxExisting + 1;
+
+  const header = `### Iteration ${iterationNum} (latest)`;
+  const newBlock = `${header}\n${newGuidance}`;
+
+  if (!existing) return newBlock;
+
+  // Strip "(latest)" from previous iteration headers
+  const cleaned = existing.replace(/ \(latest\)/g, '');
+  const accumulated = `${newBlock}\n\n---\n\n${cleaned}`;
+
+  // Truncate oldest iterations if over limit
+  if (accumulated.length <= GUIDANCE_MAX_CHARS) return accumulated;
+
+  // Split by iteration headers, drop oldest iterations until under limit
+  const sections = accumulated.split(/(?=^### Iteration \d+)/m);
+  let result = '';
+  for (const section of sections) {
+    if (result.length + section.length > GUIDANCE_MAX_CHARS && result.length > 0) {
+      result += '\n\n[Earlier iterations truncated]';
+      break;
+    }
+    result += section;
+  }
+  return result;
+}
+
+/**
+ * Extract [DEAD-APPROACH] markers from synthesiser output.
+ * Format: [DEAD-APPROACH] approach name: why it cannot work
+ */
+export function parseSynthesiserDeadApproaches(output: string): Array<{ approach: string; reason: string }> {
+  const results: Array<{ approach: string; reason: string }> = [];
+  const regex = /\[DEAD-APPROACH\]\s*(.+?):\s*(.+)/g;
+  let match;
+  while ((match = regex.exec(output)) !== null) {
+    results.push({ approach: match[1].trim(), reason: match[2].trim() });
+  }
+  return results;
+}
+
 /**
  * Determine the worst grade from a set of verifications.
  * Deterministic: rejected > weak > good > sound.
@@ -70,11 +124,12 @@ export async function resolve(
     }
     // Downgrade to weak — cycle back with guidance about the gate violation
     updateExperimentStatus(db, exp.id, 'resolved');
-    const guidanceText = `Gate fixture regression blocks merge. Fix these regressions before re-attempting:\n` +
+    const gateGuidance = `Gate fixture regression blocks merge. Fix these regressions before re-attempting:\n` +
       gateViolations.map(v => `- ${v.fixture} / ${v.metric}: was ${v.before}, now ${v.after}`).join('\n');
+    const accumulatedGate = accumulateGuidance(exp.builder_guidance, gateGuidance);
     transition(ExperimentStatus.RESOLVED, ExperimentStatus.BUILDING);
     db.transaction(() => {
-      storeBuilderGuidance(db, exp.id, guidanceText);
+      storeBuilderGuidance(db, exp.id, accumulatedGate);
       updateExperimentStatus(db, exp.id, 'building');
       if (exp.sub_type) {
         incrementSubTypeFailure(db, exp.sub_type, exp.id, 'weak');
@@ -134,16 +189,43 @@ export async function resolve(
           'and what constraints must the next approach satisfy.',
       }, projectRoot);
 
-      const guidanceText = guidance.structured?.guidance ?? guidance.output;
+      const rawGuidance = guidance.structured?.guidance ?? guidance.output;
+
+      // Accumulate guidance across iterations instead of overwriting
+      const accumulated = accumulateGuidance(exp.builder_guidance, rawGuidance);
+
       transition(ExperimentStatus.RESOLVED, ExperimentStatus.BUILDING);
       db.transaction(() => {
-        storeBuilderGuidance(db, exp.id, guidanceText);
+        storeBuilderGuidance(db, exp.id, accumulated);
         updateExperimentStatus(db, exp.id, 'building');
         if (exp.sub_type) {
           incrementSubTypeFailure(db, exp.sub_type, exp.id, 'weak');
         }
+
+        // Register component-level dead-ends from rejected verifier grades
+        const rejectedInWeak = grades.filter(g => g.grade === 'rejected');
+        for (const rc of rejectedInWeak) {
+          insertDeadEnd(db, exp.id,
+            `${rc.component} (iteration within ${exp.slug})`,
+            rc.notes ?? 'rejected by verifier',
+            `Component ${rc.component} rejected: ${rc.notes ?? 'approach does not work'}`,
+            exp.sub_type, 'structural');
+        }
+        if (rejectedInWeak.length > 0) {
+          fmt.info(`Registered ${rejectedInWeak.length} component-level dead-end(s) from weak verification.`);
+        }
+
+        // Register approach-level dead-ends from synthesiser [DEAD-APPROACH] markers
+        const deadApproaches = parseSynthesiserDeadApproaches(guidance.output);
+        for (const da of deadApproaches) {
+          insertDeadEnd(db, exp.id, da.approach, da.reason,
+            da.reason, exp.sub_type, 'structural');
+        }
+        if (deadApproaches.length > 0) {
+          fmt.info(`Registered ${deadApproaches.length} dead approach(es) from synthesiser.`);
+        }
       })();
-      fmt.warn(`Experiment ${exp.slug} CYCLING BACK (weak). Guidance generated for builder.`);
+      fmt.warn(`Experiment ${exp.slug} CYCLING BACK (weak). Guidance accumulated for builder.`);
       break;
     }
 
@@ -208,11 +290,12 @@ export async function resolveDbOnly(
       fmt.warn(`  ${v.fixture} / ${v.metric}: ${v.before} → ${v.after} (${v.delta > 0 ? '+' : ''}${v.delta})`);
     }
     updateExperimentStatus(db, exp.id, 'resolved');
-    const guidanceText = `Gate fixture regression blocks merge. Fix these regressions before re-attempting:\n` +
+    const swarmGateGuidance = `Gate fixture regression blocks merge. Fix these regressions before re-attempting:\n` +
       gateViolations.map(v => `- ${v.fixture} / ${v.metric}: was ${v.before}, now ${v.after}`).join('\n');
+    const accumulatedSwarmGate = accumulateGuidance(exp.builder_guidance, swarmGateGuidance);
     transition(ExperimentStatus.RESOLVED, ExperimentStatus.BUILDING);
     db.transaction(() => {
-      storeBuilderGuidance(db, exp.id, guidanceText);
+      storeBuilderGuidance(db, exp.id, accumulatedSwarmGate);
       updateExperimentStatus(db, exp.id, 'building');
       if (exp.sub_type) {
         incrementSubTypeFailure(db, exp.sub_type, exp.id, 'weak');
@@ -260,16 +343,43 @@ export async function resolveDbOnly(
           'and what constraints must the next approach satisfy.',
       }, projectRoot);
 
-      const guidanceText = guidance.structured?.guidance ?? guidance.output;
+      const rawGuidance = guidance.structured?.guidance ?? guidance.output;
+
+      // Accumulate guidance across iterations instead of overwriting
+      const accumulated = accumulateGuidance(exp.builder_guidance, rawGuidance);
+
       transition(ExperimentStatus.RESOLVED, ExperimentStatus.BUILDING);
       db.transaction(() => {
-        storeBuilderGuidance(db, exp.id, guidanceText);
+        storeBuilderGuidance(db, exp.id, accumulated);
         updateExperimentStatus(db, exp.id, 'building');
         if (exp.sub_type) {
           incrementSubTypeFailure(db, exp.sub_type, exp.id, 'weak');
         }
+
+        // Register component-level dead-ends from rejected verifier grades
+        const rejectedInWeak = grades.filter(g => g.grade === 'rejected');
+        for (const rc of rejectedInWeak) {
+          insertDeadEnd(db, exp.id,
+            `${rc.component} (iteration within ${exp.slug})`,
+            rc.notes ?? 'rejected by verifier',
+            `Component ${rc.component} rejected: ${rc.notes ?? 'approach does not work'}`,
+            exp.sub_type, 'structural');
+        }
+        if (rejectedInWeak.length > 0) {
+          fmt.info(`Registered ${rejectedInWeak.length} component-level dead-end(s) from weak verification.`);
+        }
+
+        // Register approach-level dead-ends from synthesiser [DEAD-APPROACH] markers
+        const deadApproaches = parseSynthesiserDeadApproaches(guidance.output);
+        for (const da of deadApproaches) {
+          insertDeadEnd(db, exp.id, da.approach, da.reason,
+            da.reason, exp.sub_type, 'structural');
+        }
+        if (deadApproaches.length > 0) {
+          fmt.info(`Registered ${deadApproaches.length} dead approach(es) from synthesiser.`);
+        }
       })();
-      fmt.warn(`Experiment ${exp.slug} CYCLING BACK (weak). Guidance generated.`);
+      fmt.warn(`Experiment ${exp.slug} CYCLING BACK (weak). Guidance accumulated.`);
       break;
     }
 

@@ -486,7 +486,12 @@ export async function spawnSynthesiser(
 
   const systemPrompt =
     'You are a Synthesis Agent. Be concrete: which decisions failed, which assumptions broke, ' +
-    'what constraints must the next approach satisfy. ' +
+    'what constraints must the next approach satisfy.\n\n' +
+    'If any approach from this iteration is PROVABLY dead (not just needs refinement — ' +
+    'structurally impossible or fundamentally wrong), flag it on its own line as:\n' +
+    '[DEAD-APPROACH] approach name: why it cannot work\n\n' +
+    'Only use [DEAD-APPROACH] for approaches that are mathematically impossible, violate invariants, ' +
+    'or have been empirically proven to fail. Do NOT flag approaches that merely need adjustment.\n\n' +
     'CRITICAL: Your LAST line of output MUST be a <!-- majlis-json --> block. ' +
     'The framework parses this programmatically — if you omit it, the pipeline breaks. ' +
     'Format: <!-- majlis-json {"guidance": "your guidance here"} -->';
