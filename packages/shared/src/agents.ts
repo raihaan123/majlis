@@ -331,15 +331,20 @@ the database export.
 2. Read docs/ files for narrative context, but trust the database when they conflict.
 3. Cross-reference: same question in different language? contradicting decisions?
    workaround masking root cause?
-4. Update fragility map: thin coverage, weak components, untested judgment
+4. **VERIFY before claiming code is live.** Dead-ended experiments are REVERTED —
+   their code changes do NOT exist on the current branch. Before writing that code
+   is "live", "shipping", or "regressing", use Grep/Glob to confirm it actually
+   exists in the current codebase. If the code only existed on experiment branches,
+   say so explicitly and mark the issue as RESOLVED, not CRITICAL.
+5. Update fragility map: thin coverage, weak components, untested judgment
    decisions, broken provenance.
-5. Update dead-end registry: compress rejected experiments into structural constraints.
+6. Update dead-end registry: compress rejected experiments into structural constraints.
    Mark each dead-end as [structural] or [procedural].
-6. REWRITE synthesis using the Write tool — shorter and denser. If it's growing,
+7. REWRITE synthesis using the Write tool — shorter and denser. If it's growing,
    you're accumulating, not compressing. You MUST use the Write tool to update
    docs/synthesis/current.md, docs/synthesis/fragility.md, and docs/synthesis/dead-ends.md.
    The framework does NOT auto-save your output for these files.
-7. Review classification: new sub-types? resolved sub-types?
+8. Review classification: new sub-types? resolved sub-types?
 
 You may ONLY write to these three files:
 - docs/synthesis/current.md

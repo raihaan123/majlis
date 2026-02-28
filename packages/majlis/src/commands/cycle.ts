@@ -697,12 +697,23 @@ async function doCompress(db: ReturnType<typeof getDb>, root: string): Promise<v
   // Export structured data from DB — the compressor's canonical source of truth
   const dbExport = exportForCompressor(db);
 
+  // Detect current branch so compressor knows what code is actually live
+  let currentBranch = 'main';
+  try {
+    currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: root, encoding: 'utf-8',
+    }).trim();
+  } catch { /* default to main */ }
+
   const result = await spawnAgent('compressor', {
     taskPrompt:
       '## Structured Data (CANONICAL — from SQLite database)\n' +
       'The database export below is the source of truth. docs/ files are agent artifacts that may contain ' +
       'stale or incorrect information. Cross-reference everything against this data.\n\n' +
       dbExport + '\n\n' +
+      `## Current Branch: ${currentBranch}\n` +
+      'Dead-ended experiments have been REVERTED — their code changes do NOT exist on this branch. ' +
+      'Before claiming any code is "live" or "regressing", verify with Grep/Glob that it exists in the current codebase.\n\n' +
       '## Your Task\n' +
       'Read ALL experiments, decisions, doubts, challenges, verification reports, reframes, and recent diffs. ' +
       'Cross-reference for contradictions, redundancies, and patterns. ' +
