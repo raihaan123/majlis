@@ -1,16 +1,16 @@
 # Majlis
 
-[![npm v0.8.1](https://img.shields.io/badge/npm-v0.8.1-blue)](https://www.npmjs.com/package/majlis)
+> **When being confidently wrong is more expensive than being slow.**
 
-**Structured multi-agent problem solving through doubt, verification, and compressed knowledge.**
+[![npm v0.8.1](https://img.shields.io/badge/npm-v0.8.1-blue)](https://www.npmjs.com/package/majlis) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Standard AI coding agents are great at boilerplate, but terrible at novel engineering. They get stuck in loops, hallucinate fixes that break other things, forget context over time, and confidently optimise the wrong objectives.
 
-Majlis wraps Claude Code in a deterministic state machine. It forces AI agents into a rigorous scientific method: classify the problem, hypothesise a solution, build it, systematically doubt it, independently verify it, and compress what was learned into durable knowledge. Before code is merged, it must survive challenge, verification, and regression gates.
-
-**This is not for:** fixing syntax errors, standard API integration, boilerplate generation, or any problem where the answer is already known.
+Majlis wraps Claude Code in a deterministic state machine that forces structured doubt, independent verification, and compressed knowledge. Every hypothesis must survive challenge before merge. Every failure is catalogued as a structural constraint. Every session's learnings are compressed into durable institutional memory. No LLM decides the routing — the state machine does.
 
 **This is for:** novel algorithm development, mathematical proof exploration, complex system design where failure modes are unknown, and any problem where being confidently wrong is more expensive than being slow.
+
+Built on [fifteen traditions](FOUNDATIONS.md) of Islamic scholarship on managing complexity, verifying truth, and making decisions under uncertainty.
 
 ## Quick Start
 
