@@ -98,12 +98,12 @@ describe('Migrations', () => {
 
 describe('Experiments CRUD', () => {
   it('creates an experiment', () => {
-    const exp = createExperiment(db, 'test-exp', 'exp/001-test', 'Test hypothesis', 'seam', null);
+    const exp = createExperiment(db, 'test-exp', 'exp/001-test', 'Test hypothesis', 'parsing', null);
     assert.equal(exp.slug, 'test-exp');
     assert.equal(exp.branch, 'exp/001-test');
     assert.equal(exp.status, 'classified');
     assert.equal(exp.hypothesis, 'Test hypothesis');
-    assert.equal(exp.sub_type, 'seam');
+    assert.equal(exp.sub_type, 'parsing');
   });
 
   it('gets by id', () => {
@@ -149,8 +149,8 @@ describe('Experiments CRUD', () => {
 
   it('stores and retrieves builder guidance', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    storeBuilderGuidance(db, exp.id, 'Fix the seam handling');
-    assert.equal(getBuilderGuidance(db, exp.id), 'Fix the seam handling');
+    storeBuilderGuidance(db, exp.id, 'Fix the retry logic');
+    assert.equal(getBuilderGuidance(db, exp.id), 'Fix the retry logic');
   });
 });
 
@@ -200,8 +200,8 @@ describe('Decisions', () => {
 describe('Metrics', () => {
   it('inserts and retrieves by experiment+phase', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    insertMetric(db, exp.id, 'before', 'ubracket', 'free_edges', 10);
-    insertMetric(db, exp.id, 'before', 'ubracket', 'volume_error', 0.5);
+    insertMetric(db, exp.id, 'before', 'benchmark_a', 'error_count', 10);
+    insertMetric(db, exp.id, 'before', 'benchmark_a', 'latency_ms', 0.5);
     const metrics = getMetricsByExperimentAndPhase(db, exp.id, 'before');
     assert.equal(metrics.length, 2);
   });
@@ -209,41 +209,41 @@ describe('Metrics', () => {
   it('enforces valid phase', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
     assert.throws(() => {
-      insertMetric(db, exp.id, 'invalid', 'ubracket', 'free_edges', 10);
+      insertMetric(db, exp.id, 'invalid', 'benchmark_a', 'error_count', 10);
     });
   });
 
   it('retrieves history by fixture', () => {
     const exp1 = createExperiment(db, 'test1', 'exp/001', 'Test1', null, null);
     const exp2 = createExperiment(db, 'test2', 'exp/002', 'Test2', null, null);
-    insertMetric(db, exp1.id, 'before', 'ubracket', 'free_edges', 10);
-    insertMetric(db, exp2.id, 'after', 'ubracket', 'free_edges', 5);
-    const history = getMetricHistoryByFixture(db, 'ubracket');
+    insertMetric(db, exp1.id, 'before', 'benchmark_a', 'error_count', 10);
+    insertMetric(db, exp2.id, 'after', 'benchmark_a', 'error_count', 5);
+    const history = getMetricHistoryByFixture(db, 'benchmark_a');
     assert.equal(history.length, 2);
   });
 });
 
 describe('Dead Ends', () => {
   it('inserts and retrieves', () => {
-    const exp = createExperiment(db, 'test', 'exp/001', 'Test', 'seam', null);
-    const de = insertDeadEnd(db, exp.id, 'Strategy 1', 'Zero-area faces', 'Avoid strategy 1 for seams', 'seam');
-    assert.equal(de.sub_type, 'seam');
-    assert.equal(de.structural_constraint, 'Avoid strategy 1 for seams');
+    const exp = createExperiment(db, 'test', 'exp/001', 'Test', 'parsing', null);
+    const de = insertDeadEnd(db, exp.id, 'Strategy 1', 'Timeout on large input', 'Avoid strategy 1 for parsing', 'parsing');
+    assert.equal(de.sub_type, 'parsing');
+    assert.equal(de.structural_constraint, 'Avoid strategy 1 for parsing');
   });
 
   it('lists by sub_type', () => {
-    const exp = createExperiment(db, 'test', 'exp/001', 'Test', 'seam', null);
-    insertDeadEnd(db, exp.id, 'A', 'F', 'C', 'seam');
-    insertDeadEnd(db, exp.id, 'B', 'F', 'C', 'tjunction');
-    const seams = listDeadEndsBySubType(db, 'seam');
-    assert.equal(seams.length, 1);
+    const exp = createExperiment(db, 'test', 'exp/001', 'Test', 'parsing', null);
+    insertDeadEnd(db, exp.id, 'A', 'F', 'C', 'parsing');
+    insertDeadEnd(db, exp.id, 'B', 'F', 'C', 'indexing');
+    const results = listDeadEndsBySubType(db, 'parsing');
+    assert.equal(results.length, 1);
   });
 
   it('searches by text', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    insertDeadEnd(db, exp.id, 'Strategy for periodic surfaces', 'UV mapping broke', 'Constraint', null);
+    insertDeadEnd(db, exp.id, 'Strategy for batch processing', 'Queue overflow broke', 'Constraint', null);
     insertDeadEnd(db, exp.id, 'Other approach', 'Unrelated fail', 'Other', null);
-    const results = searchDeadEnds(db, 'periodic');
+    const results = searchDeadEnds(db, 'batch');
     assert.equal(results.length, 1);
   });
 });
@@ -251,9 +251,9 @@ describe('Dead Ends', () => {
 describe('Verifications', () => {
   it('inserts a grade', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    const v = insertVerification(db, exp.id, 'cylinder_builder', 'good', true, true, 'Works for half cylinders');
+    const v = insertVerification(db, exp.id, 'query_planner', 'good', true, true, 'Works for small datasets');
     assert.equal(v.grade, 'good');
-    assert.equal(v.component, 'cylinder_builder');
+    assert.equal(v.component, 'query_planner');
   });
 
   it('enforces valid grades', () => {
@@ -275,7 +275,7 @@ describe('Verifications', () => {
 describe('Doubts', () => {
   it('inserts a doubt', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    const d = insertDoubt(db, exp.id, 'Tolerance assumption', 'judgment', 'EXP-003 used different value', 'moderate');
+    const d = insertDoubt(db, exp.id, 'Timeout assumption', 'judgment', 'EXP-003 used different value', 'moderate');
     assert.equal(d.severity, 'moderate');
     assert.equal(d.resolution, null);
   });
@@ -317,9 +317,9 @@ describe('Doubts', () => {
 describe('Challenges', () => {
   it('inserts a challenge', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    const c = insertChallenge(db, exp.id, 'Degenerate input', 'Zero-area faces collapse the algorithm');
-    assert.equal(c.description, 'Degenerate input');
-    assert.equal(c.reasoning, 'Zero-area faces collapse the algorithm');
+    const c = insertChallenge(db, exp.id, 'Malformed input', 'Empty payloads collapse the algorithm');
+    assert.equal(c.description, 'Malformed input');
+    assert.equal(c.reasoning, 'Empty payloads collapse the algorithm');
     assert.equal(c.experiment_id, exp.id);
   });
 
@@ -341,49 +341,49 @@ describe('Challenges', () => {
 
 describe('Sub-Type Failures (Circuit Breakers)', () => {
   it('increments failures', () => {
-    const exp = createExperiment(db, 'test', 'exp/001', 'Test', 'seam', null);
-    incrementSubTypeFailure(db, 'seam', exp.id, 'weak');
-    incrementSubTypeFailure(db, 'seam', exp.id, 'weak');
-    const failures = getSubTypeFailures(db, 'seam');
+    const exp = createExperiment(db, 'test', 'exp/001', 'Test', 'parsing', null);
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'weak');
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'weak');
+    const failures = getSubTypeFailures(db, 'parsing');
     assert.equal(failures.length, 2);
   });
 
   it('counts weak+rejected failures', () => {
-    const exp = createExperiment(db, 'test', 'exp/001', 'Test', 'seam', null);
-    incrementSubTypeFailure(db, 'seam', exp.id, 'weak');
-    incrementSubTypeFailure(db, 'seam', exp.id, 'rejected');
-    incrementSubTypeFailure(db, 'seam', exp.id, 'weak');
-    assert.equal(getSubTypeFailureCount(db, 'seam'), 3);
+    const exp = createExperiment(db, 'test', 'exp/001', 'Test', 'parsing', null);
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'weak');
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'rejected');
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'weak');
+    assert.equal(getSubTypeFailureCount(db, 'parsing'), 3);
   });
 
   it('checks circuit breaker threshold', () => {
-    const exp = createExperiment(db, 'test', 'exp/001', 'Test', 'seam', null);
-    incrementSubTypeFailure(db, 'seam', exp.id, 'weak');
-    incrementSubTypeFailure(db, 'seam', exp.id, 'weak');
-    assert.equal(checkCircuitBreaker(db, 'seam', 3), false);
-    incrementSubTypeFailure(db, 'seam', exp.id, 'rejected');
-    assert.equal(checkCircuitBreaker(db, 'seam', 3), true);
+    const exp = createExperiment(db, 'test', 'exp/001', 'Test', 'parsing', null);
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'weak');
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'weak');
+    assert.equal(checkCircuitBreaker(db, 'parsing', 3), false);
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'rejected');
+    assert.equal(checkCircuitBreaker(db, 'parsing', 3), true);
   });
 
   it('gets all circuit breaker states', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    incrementSubTypeFailure(db, 'seam', exp.id, 'weak');
-    incrementSubTypeFailure(db, 'seam', exp.id, 'weak');
-    incrementSubTypeFailure(db, 'seam', exp.id, 'weak');
-    incrementSubTypeFailure(db, 'tjunc', exp.id, 'weak');
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'weak');
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'weak');
+    incrementSubTypeFailure(db, 'parsing', exp.id, 'weak');
+    incrementSubTypeFailure(db, 'indexing', exp.id, 'weak');
     const states = getAllCircuitBreakerStates(db, 3);
     assert.equal(states.length, 2);
-    const seam = states.find(s => s.sub_type === 'seam');
-    assert.equal(seam?.tripped, true);
-    const tjunc = states.find(s => s.sub_type === 'tjunc');
-    assert.equal(tjunc?.tripped, false);
+    const parsing = states.find(s => s.sub_type === 'parsing');
+    assert.equal(parsing?.tripped, true);
+    const indexing = states.find(s => s.sub_type === 'indexing');
+    assert.equal(indexing?.tripped, false);
   });
 });
 
 describe('Sessions', () => {
   it('starts a session', () => {
-    const s = startSession(db, 'Fix degenerate faces', null);
-    assert.equal(s.intent, 'Fix degenerate faces');
+    const s = startSession(db, 'Fix input validation', null);
+    assert.equal(s.intent, 'Fix input validation');
     assert.equal(s.ended_at, null);
   });
 
@@ -439,16 +439,16 @@ describe('Compressions', () => {
 // ── Fix #1: Experiment Lineage ─────────────────────────────
 describe('exportExperimentLineage()', () => {
   it('includes decisions, metrics, doubts, verifications, and dead-ends', () => {
-    const exp = createExperiment(db, 'lineage-test', 'exp/001-lineage-test', 'Test lineage', 'geometry', null);
+    const exp = createExperiment(db, 'lineage-test', 'exp/001-lineage-test', 'Test lineage', 'routing', null);
     insertDecision(db, exp.id, 'Use approach A', 'test', 'Validated via fixture');
     insertMetric(db, exp.id, 'before', 'fixture1', 'accuracy', 0.85);
     insertMetric(db, exp.id, 'after', 'fixture1', 'accuracy', 0.92);
-    insertDoubt(db, exp.id, 'Tolerance assumption', 'test', 'Edge case not covered', 'moderate');
+    insertDoubt(db, exp.id, 'Timeout assumption', 'test', 'Edge case not covered', 'moderate');
     updateDoubtResolution(db, 1, 'confirmed');
     insertVerification(db, exp.id, 'approach_A', 'sound', true, true, 'Looks good');
-    insertDeadEnd(db, exp.id, 'approach B', 'Failed structurally', 'Cannot handle topology', 'geometry', 'structural');
+    insertDeadEnd(db, exp.id, 'approach B', 'Failed structurally', 'Cannot handle concurrency', 'routing', 'structural');
 
-    const lineage = exportExperimentLineage(db, 'geometry');
+    const lineage = exportExperimentLineage(db, 'routing');
     assert.ok(lineage.includes('lineage-test'));
     assert.ok(lineage.includes('Use approach A'));
     assert.ok(lineage.includes('[test/active]'));
@@ -458,20 +458,20 @@ describe('exportExperimentLineage()', () => {
     assert.ok(lineage.includes('[confirmed]'));
     assert.ok(lineage.includes('approach_A: sound'));
     assert.ok(lineage.includes('approach B'));
-    assert.ok(lineage.includes('Cannot handle topology'));
+    assert.ok(lineage.includes('Cannot handle concurrency'));
   });
 
   it('filters by sub_type', () => {
-    createExperiment(db, 'geo-exp', 'exp/001-geo', 'Geometry test', 'geometry', null);
+    createExperiment(db, 'route-exp', 'exp/001-route', 'Routing test', 'routing', null);
     createExperiment(db, 'algo-exp', 'exp/002-algo', 'Algorithm test', 'algorithm', null);
 
-    const geoLineage = exportExperimentLineage(db, 'geometry');
-    assert.ok(geoLineage.includes('geo-exp'));
-    assert.ok(!geoLineage.includes('algo-exp'));
+    const routeLineage = exportExperimentLineage(db, 'routing');
+    assert.ok(routeLineage.includes('route-exp'));
+    assert.ok(!routeLineage.includes('algo-exp'));
 
     const algoLineage = exportExperimentLineage(db, 'algorithm');
     assert.ok(algoLineage.includes('algo-exp'));
-    assert.ok(!algoLineage.includes('geo-exp'));
+    assert.ok(!algoLineage.includes('route-exp'));
   });
 
   it('truncates at maxLength', () => {

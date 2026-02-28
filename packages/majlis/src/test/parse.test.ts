@@ -60,9 +60,9 @@ describe('Tier 2: extractViaPatterns()', () => {
   it('extracts inline evidence level tags', () => {
     const markdown = `
 ## Decisions
-[judgment] Use parametric seam splitting for periodic surfaces
-[test] Validated edge merging with ubracket fixture
-[analogy] Apply cylinder strategy from EXP-003
+[judgment] Use indexed lookup for candidate filtering
+[test] Validated batch processing with benchmark_a fixture
+[analogy] Apply caching strategy from EXP-003
 `;
     const result = extractViaPatterns('builder', markdown);
     assert.ok(result?.decisions);
@@ -75,29 +75,29 @@ describe('Tier 2: extractViaPatterns()', () => {
   it('extracts grade patterns', () => {
     const markdown = `
 ## Verification
-- cylinder_builder: sound
-- seam_handler: weak
-- face_validator: good
-- edge_merger: rejected
+- query_planner: sound
+- cache_layer: weak
+- input_validator: good
+- retry_handler: rejected
 `;
     const result = extractViaPatterns('verifier', markdown);
     assert.ok(result?.grades);
     assert.equal(result.grades.length, 4);
-    assert.equal(result.grades.find(g => g.component === 'cylinder_builder')?.grade, 'sound');
-    assert.equal(result.grades.find(g => g.component === 'seam_handler')?.grade, 'weak');
-    assert.equal(result.grades.find(g => g.component === 'edge_merger')?.grade, 'rejected');
+    assert.equal(result.grades.find(g => g.component === 'query_planner')?.grade, 'sound');
+    assert.equal(result.grades.find(g => g.component === 'cache_layer')?.grade, 'weak');
+    assert.equal(result.grades.find(g => g.component === 'retry_handler')?.grade, 'rejected');
   });
 
   it('extracts doubt patterns with severity', () => {
     const markdown = `
 ## Doubts
 
-Doubt 1: Tolerance assumption
-The approach assumes vertex proximity.
+Doubt 1: Timeout assumption
+The approach assumes low latency.
 Severity: moderate
 
-Doubt 2: Untested topology
-No tests for star junctions.
+Doubt 2: Untested concurrency
+No tests for parallel writes.
 Severity: critical
 `;
     const result = extractViaPatterns('critic', markdown);
@@ -120,13 +120,13 @@ Severity: critical
 
 After analyzing the codebase, this hypothesis cannot work.
 
-[ABANDON] The torus topology has no seam-free embedding in R3
-Structural constraint: Euler characteristic of torus is 0, requiring at least one cut
+[ABANDON] The dependency graph has a cycle that prevents topological ordering
+Structural constraint: Cyclic dependency requires at least one back-edge cut
 `;
     const result = extractViaPatterns('builder', markdown);
     assert.ok(result?.abandon);
-    assert.ok(result.abandon.reason.includes('torus topology'));
-    assert.ok(result.abandon.structural_constraint.includes('Euler characteristic'));
+    assert.ok(result.abandon.reason.includes('dependency graph'));
+    assert.ok(result.abandon.structural_constraint.includes('Cyclic dependency'));
   });
 
   it('extracts HYPOTHESIS INVALID marker', () => {
@@ -158,7 +158,7 @@ describe('extractStructuredData() tier tracking', () => {
   });
 
   it('returns tier 2 for regex-extracted data', async () => {
-    const markdown = `## Decisions\n[judgment] Use approach A for surface splitting\n`;
+    const markdown = `## Decisions\n[judgment] Use approach A for query optimization\n`;
     const { data, tier } = await extractStructuredData('builder', markdown);
     assert.ok(data);
     assert.equal(tier, 2);

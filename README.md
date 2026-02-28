@@ -34,14 +34,14 @@ Majlis handles the management; you provide the direction.
 
 **1. Declare your intent:**
 ```bash
-majlis session start "Fixing the boundary collision bug"
+majlis session start "Improving the query planner performance"
 ```
 
 **2. Propose a specific, testable hypothesis:**
 ```bash
-majlis new "Use a bounding-box pre-filter to cull distant vertices" \
-  --sub-type collision \
-  --context docs/algorithms/spatial-hashing.md
+majlis new "Replace nested loops with an indexed lookup for candidate filtering" \
+  --sub-type search \
+  --context docs/architecture/query-planner.md
 ```
 
 **3. Let the Majlis debate:**
@@ -98,14 +98,14 @@ For problems where you want the framework to run end-to-end without intervention
 
 **Sequential (one experiment at a time):**
 ```bash
-majlis run "Pass sig1 L6 segmentation"
+majlis run "Pass all benchmark suites under 200ms p99 latency"
 ```
 
 The orchestrator plans experiments, creates them, runs full cycles, and creates new experiments when one is dead-ended — until the goal is met or all approaches are exhausted.
 
 **Parallel (multiple experiments in worktrees):**
 ```bash
-majlis swarm "Improve collision detection" --parallel 3
+majlis swarm "Reduce memory allocation in hot path" --parallel 3
 ```
 
 Runs N experiments simultaneously in separate git worktrees. Each gets its own branch, DB, and full cycle. The best result is merged; the rest become dead-ends with learnings.

@@ -164,7 +164,7 @@ describe('majlis status', () => {
 describe('majlis new', () => {
   it('creates an experiment', () => {
     run('init');
-    const output = run('new "Test hypothesis for seam handling"');
+    const output = run('new "Test hypothesis for retry logic"');
     assert.ok(output.includes('Created experiment'));
   });
 
@@ -189,7 +189,7 @@ describe('majlis new', () => {
 describe('majlis session', () => {
   it('starts and ends a session', () => {
     run('init');
-    const startOutput = run('session start "Fix degenerate faces"');
+    const startOutput = run('session start "Fix input validation"');
     assert.ok(startOutput.includes('Session started'));
 
     const statusJson = JSON.parse(run('status --json'));

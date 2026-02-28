@@ -225,7 +225,7 @@ DO NOT read source code or use tools. All context you need is above. Plan from t
    - It must be specific and actionable — name the function or mechanism to change
    - Do NOT reference specific line numbers — they shift between experiments
    - The hypothesis should be a single sentence describing what to do, e.g.:
-     "Activate addSeamEdges() in the runEdgeFirst pipeline for full-revolution cylinder faces"
+      "Replace the O(n^2) pairwise comparison in filterCandidates() with an interval-tree lookup"
 
 CRITICAL: Your LAST line of output MUST be EXACTLY this format (on its own line, nothing after it):
 <!-- majlis-json {"goal_met": false, "hypothesis": "your single-sentence hypothesis here"} -->

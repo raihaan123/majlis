@@ -11,13 +11,13 @@ const testConfig: MajlisConfig = {
   metrics: {
     command: 'echo test',
     fixtures: {
-      ubracket: { gate: true },
-      sig1: { gate: false },
+      benchmark_a: { gate: true },
+      benchmark_b: { gate: false },
     },
     tracked: {
-      free_edges: { direction: 'lower_is_better', target: 0 },
-      volume_error: { direction: 'lower_is_better', target: 0.001 },
-      face_count: { direction: 'higher_is_better' },
+      error_count: { direction: 'lower_is_better', target: 0 },
+      latency_ms: { direction: 'lower_is_better', target: 0.001 },
+      throughput: { direction: 'higher_is_better' },
     },
   },
   build: { pre_measure: null, post_measure: null },
@@ -40,51 +40,51 @@ beforeEach(() => {
 describe('compareMetrics()', () => {
   it('detects regression when lower_is_better metric increases', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    insertMetric(db, exp.id, 'before', 'ubracket', 'free_edges', 5);
-    insertMetric(db, exp.id, 'after', 'ubracket', 'free_edges', 10);
+    insertMetric(db, exp.id, 'before', 'benchmark_a', 'error_count', 5);
+    insertMetric(db, exp.id, 'after', 'benchmark_a', 'error_count', 10);
 
     const comparisons = compareMetrics(db, exp.id, testConfig);
-    const freeEdges = comparisons.find(c => c.metric === 'free_edges' && c.fixture === 'ubracket');
-    assert.ok(freeEdges);
-    assert.equal(freeEdges.regression, true);
-    assert.equal(freeEdges.delta, 5);
+    const errors = comparisons.find(c => c.metric === 'error_count' && c.fixture === 'benchmark_a');
+    assert.ok(errors);
+    assert.equal(errors.regression, true);
+    assert.equal(errors.delta, 5);
   });
 
   it('no regression when lower_is_better metric decreases', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    insertMetric(db, exp.id, 'before', 'ubracket', 'free_edges', 10);
-    insertMetric(db, exp.id, 'after', 'ubracket', 'free_edges', 3);
+    insertMetric(db, exp.id, 'before', 'benchmark_a', 'error_count', 10);
+    insertMetric(db, exp.id, 'after', 'benchmark_a', 'error_count', 3);
 
     const comparisons = compareMetrics(db, exp.id, testConfig);
-    const freeEdges = comparisons.find(c => c.metric === 'free_edges');
-    assert.ok(freeEdges);
-    assert.equal(freeEdges.regression, false);
-    assert.equal(freeEdges.delta, -7);
+    const errors = comparisons.find(c => c.metric === 'error_count');
+    assert.ok(errors);
+    assert.equal(errors.regression, false);
+    assert.equal(errors.delta, -7);
   });
 
   it('detects regression when higher_is_better metric decreases', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    insertMetric(db, exp.id, 'before', 'ubracket', 'face_count', 36);
-    insertMetric(db, exp.id, 'after', 'ubracket', 'face_count', 30);
+    insertMetric(db, exp.id, 'before', 'benchmark_a', 'throughput', 36);
+    insertMetric(db, exp.id, 'after', 'benchmark_a', 'throughput', 30);
 
     const comparisons = compareMetrics(db, exp.id, testConfig);
-    const faceCount = comparisons.find(c => c.metric === 'face_count');
-    assert.ok(faceCount);
-    assert.equal(faceCount.regression, true);
+    const tp = comparisons.find(c => c.metric === 'throughput');
+    assert.ok(tp);
+    assert.equal(tp.regression, true);
   });
 
   it('handles multiple fixtures', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    insertMetric(db, exp.id, 'before', 'ubracket', 'free_edges', 5);
-    insertMetric(db, exp.id, 'after', 'ubracket', 'free_edges', 0);
-    insertMetric(db, exp.id, 'before', 'sig1', 'free_edges', 25);
-    insertMetric(db, exp.id, 'after', 'sig1', 'free_edges', 30);
+    insertMetric(db, exp.id, 'before', 'benchmark_a', 'error_count', 5);
+    insertMetric(db, exp.id, 'after', 'benchmark_a', 'error_count', 0);
+    insertMetric(db, exp.id, 'before', 'benchmark_b', 'error_count', 25);
+    insertMetric(db, exp.id, 'after', 'benchmark_b', 'error_count', 30);
 
     const comparisons = compareMetrics(db, exp.id, testConfig);
-    const ubracket = comparisons.find(c => c.fixture === 'ubracket' && c.metric === 'free_edges');
-    const sig1 = comparisons.find(c => c.fixture === 'sig1' && c.metric === 'free_edges');
-    assert.equal(ubracket?.regression, false);
-    assert.equal(sig1?.regression, true);
+    const bmA = comparisons.find(c => c.fixture === 'benchmark_a' && c.metric === 'error_count');
+    const bmB = comparisons.find(c => c.fixture === 'benchmark_b' && c.metric === 'error_count');
+    assert.equal(bmA?.regression, false);
+    assert.equal(bmB?.regression, true);
   });
 
   it('returns empty array when no metrics', () => {
@@ -95,7 +95,7 @@ describe('compareMetrics()', () => {
 
   it('skips metrics only present in one phase', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    insertMetric(db, exp.id, 'before', 'ubracket', 'free_edges', 5);
+    insertMetric(db, exp.id, 'before', 'benchmark_a', 'error_count', 5);
     // No 'after' metric
     const comparisons = compareMetrics(db, exp.id, testConfig);
     assert.equal(comparisons.length, 0);
@@ -103,29 +103,29 @@ describe('compareMetrics()', () => {
 
   it('marks gate fixtures in comparisons', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    insertMetric(db, exp.id, 'before', 'ubracket', 'free_edges', 0);
-    insertMetric(db, exp.id, 'after', 'ubracket', 'free_edges', 3);
-    insertMetric(db, exp.id, 'before', 'sig1', 'free_edges', 25);
-    insertMetric(db, exp.id, 'after', 'sig1', 'free_edges', 20);
+    insertMetric(db, exp.id, 'before', 'benchmark_a', 'error_count', 0);
+    insertMetric(db, exp.id, 'after', 'benchmark_a', 'error_count', 3);
+    insertMetric(db, exp.id, 'before', 'benchmark_b', 'error_count', 25);
+    insertMetric(db, exp.id, 'after', 'benchmark_b', 'error_count', 20);
 
     const comparisons = compareMetrics(db, exp.id, testConfig);
-    const ubracket = comparisons.find(c => c.fixture === 'ubracket' && c.metric === 'free_edges');
-    const sig1 = comparisons.find(c => c.fixture === 'sig1' && c.metric === 'free_edges');
-    assert.equal(ubracket?.gate, true);
-    assert.equal(sig1?.gate, false);
+    const bmA = comparisons.find(c => c.fixture === 'benchmark_a' && c.metric === 'error_count');
+    const bmB = comparisons.find(c => c.fixture === 'benchmark_b' && c.metric === 'error_count');
+    assert.equal(bmA?.gate, true);
+    assert.equal(bmB?.gate, false);
   });
 
   it('detects gate violations', () => {
     const exp = createExperiment(db, 'test', 'exp/001', 'Test', null, null);
-    insertMetric(db, exp.id, 'before', 'ubracket', 'free_edges', 0);
-    insertMetric(db, exp.id, 'after', 'ubracket', 'free_edges', 5);  // regression on gate
-    insertMetric(db, exp.id, 'before', 'sig1', 'free_edges', 25);
-    insertMetric(db, exp.id, 'after', 'sig1', 'free_edges', 20);     // improvement on non-gate
+    insertMetric(db, exp.id, 'before', 'benchmark_a', 'error_count', 0);
+    insertMetric(db, exp.id, 'after', 'benchmark_a', 'error_count', 5);  // regression on gate
+    insertMetric(db, exp.id, 'before', 'benchmark_b', 'error_count', 25);
+    insertMetric(db, exp.id, 'after', 'benchmark_b', 'error_count', 20);     // improvement on non-gate
 
     const comparisons = compareMetrics(db, exp.id, testConfig);
     const violations = checkGateViolations(comparisons);
     assert.equal(violations.length, 1);
-    assert.equal(violations[0].fixture, 'ubracket');
+    assert.equal(violations[0].fixture, 'benchmark_a');
     assert.equal(violations[0].regression, true);
     assert.equal(violations[0].gate, true);
   });
@@ -153,15 +153,15 @@ describe('parseMetricsOutput()', () => {
   it('parses standard fixture format', () => {
     const json = JSON.stringify({
       fixtures: {
-        ubracket: { free_edges: 0, volume_error: 0.0003, face_count: 36 },
-        sig1: { free_edges: 25, volume_error: 6.51, face_count: 39 },
+        benchmark_a: { error_count: 0, latency_ms: 0.0003, throughput: 36 },
+        benchmark_b: { error_count: 25, latency_ms: 6.51, throughput: 39 },
       },
     });
     const result = parseMetricsOutput(json);
     assert.equal(result.length, 6);
-    assert.ok(result.find(r => r.fixture === 'ubracket' && r.metric_name === 'free_edges'));
+    assert.ok(result.find(r => r.fixture === 'benchmark_a' && r.metric_name === 'error_count'));
     assert.equal(
-      result.find(r => r.fixture === 'ubracket' && r.metric_name === 'free_edges')?.metric_value,
+      result.find(r => r.fixture === 'benchmark_a' && r.metric_name === 'error_count')?.metric_value,
       0,
     );
   });

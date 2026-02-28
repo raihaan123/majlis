@@ -22,7 +22,7 @@ Read source code at the specific locations relevant to your change. Do NOT
 read the entire codebase or run diagnostic Python scripts. If the synthesis
 says "lines 1921-22" then read those lines and their context. That's it.
 
-Do NOT read raw data files (fixtures/, ground truth JSON/STL). The synthesis
+Do NOT read raw data files (fixtures/, ground truth, test data). The synthesis
 has the relevant facts. Reading raw data wastes turns re-deriving what the
 doubt/challenge/verify cycle already established.
 
@@ -61,7 +61,7 @@ Do NOT iterate. Do NOT "try one more thing." The adversary, critic, and verifier
 exist to diagnose what went wrong. The cycle comes back to you with their insights.
 
 ## Off-limits (DO NOT modify)
-- \`fixtures/\` — test data, ground truth, STL files. Read-only.
+- \`fixtures/\` — test data, ground truth, reference outputs. Read-only.
 - \`scripts/benchmark.py\` — the measurement tool. Never change how you're measured.
 - \`.majlis/\` — framework config. Not your concern.
 
@@ -655,9 +655,9 @@ falsifiable structural constraint that blocks future experiments from repeating 
 ## Constraint Quality
 
 Good constraints are specific and block future repetition:
-- "L6 config space is null — 13-eval Bayesian sweep found all 12 params insensitive (ls=1.27), score ceiling 0.67"
-- "Relaxing curvature split threshold in recursive_curvature_split causes false splits on pure-surface thin strips (seg_pct 95->72.5)"
-- "Torus topology prevents genus-0 assumption for manifold extraction"
+- "Binary search fallback in sortedMerge() is O(n log n) worst-case when input contains >40% duplicates — measured via 13-run sweep, ceiling 0.67x baseline"
+- "Relaxing the pruning threshold in recursiveSplit() causes false positives on sparse inputs (accuracy 95->72.5%)"
+- "Cyclic dependency in the module graph prevents topological sort — requires at least one back-edge cut"
 
 Bad constraints are vague and useless:
 - "Didn't work"

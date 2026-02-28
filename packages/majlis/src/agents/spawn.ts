@@ -49,13 +49,13 @@ const ROLE_MAX_TURNS: Record<string, number> = {
   adversary: 30,
   verifier: 50,
   compressor: 30,
-  reframer: 20,
-  scout: 20,
-  gatekeeper: 10,
+  reframer: 30,
+  scout: 30,
+  gatekeeper: 15,
   diagnostician: 60,
   cartographer: 40,
   toolsmith: 30,
-  postmortem: 20,
+  postmortem: 30,
 };
 
 /** Tool-use intervals at which to inject checkpoint grounding reminders. */
@@ -477,7 +477,7 @@ export async function spawnSynthesiser(
   opts?: { maxTurns?: number; tools?: string[] },
 ): Promise<AgentResult> {
   const root = projectRoot ?? findProjectRoot() ?? process.cwd();
-  const maxTurns = opts?.maxTurns ?? 5;
+  const maxTurns = opts?.maxTurns ?? 15;
   const tools = opts?.tools ?? ['Read', 'Glob', 'Grep'];
 
   const contextJson = JSON.stringify(context);
@@ -613,7 +613,7 @@ export async function generateSlug(hypothesis: string, projectRoot: string): Pro
     const { text } = await runQuery({
       prompt:
         `Generate a short, descriptive git branch slug (2-4 words, lowercase, hyphen-separated) for this experiment hypothesis:\n\n"${hypothesis.slice(0, 500)}"\n\n` +
-        `Output ONLY the slug, nothing else. Examples: uv-containment-filter, skip-degenerate-faces, fix-edge-sewing-order`,
+        `Output ONLY the slug, nothing else. Examples: add-index-lookup, skip-empty-batches, fix-retry-backoff`,
       model: 'haiku',
       tools: [],
       systemPrompt: 'Output only a short hyphenated slug. No explanation, no quotes, no punctuation except hyphens.',
