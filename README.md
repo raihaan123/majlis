@@ -359,11 +359,50 @@ Three packages in a monorepo:
 
 ## Claude Code Integration
 
-Majlis integrates with Claude Code through:
+Running `majlis init` or `npx create-majlis --init` installs the following into your project:
 
-- **Agents** (`.claude/agents/`) -- Native agent discovery for each role
-- **Slash commands** (`.claude/commands/`) -- `/classify`, `/doubt`, `/challenge`, `/verify`, `/reframe`, `/compress`, `/scout`, `/audit`
-- **Hooks** (`.claude/settings.json`) -- Session start status, commit gates, subagent notifications
+### What gets created
+
+```
+.majlis/                       Framework internals (git-ignored DB)
+  config.json                  Project configuration
+  majlis.db                    SQLite database (experiment state, decisions, metrics)
+  agents/                      Master agent definitions (source of truth)
+
+.claude/                       Claude Code native integration
+  agents/                      Agent definitions (Claude Code discovers these)
+  commands/                    Slash commands (/classify, /doubt, /challenge, etc.)
+  settings.json                Hooks (merged with existing settings)
+
+docs/                          Structured documentation tree
+  synthesis/                   current.md, fragility.md, dead-ends.md
+  experiments/                 One doc per experiment (from template)
+  classification/              Problem domain taxonomies
+  doubts/, challenges/         Agent output artifacts
+  verification/, reframes/     Agent output artifacts
+
+CLAUDE.md                      Appended with Majlis Protocol section
+```
+
+### CLAUDE.md injection
+
+Majlis appends a `## Majlis Protocol` section to your project's CLAUDE.md. This tells Claude Code about the evidence hierarchy, session discipline, and where to find current state. Your existing CLAUDE.md content is preserved -- the protocol section is appended (or replaced on `majlis upgrade`).
+
+### Hooks
+
+Three hooks are merged into `.claude/settings.json` (your existing hooks are preserved):
+
+- **SessionStart** -- runs `majlis status --json` so Claude Code sees experiment state on launch
+- **PreToolUse (Bash)** -- runs `majlis check-commit` before bash commands (safety gate)
+- **SubagentStop** -- reminds you to run `majlis next` when an agent finishes
+
+### Slash commands
+
+10 commands installed in `.claude/commands/`: `/classify`, `/doubt`, `/challenge`, `/verify`, `/reframe`, `/compress`, `/scout`, `/audit`, `/diagnose`, `/scan`. These let you trigger cycle steps directly from Claude Code without switching terminals.
+
+### Upgrading
+
+`majlis upgrade` syncs agent definitions, slash commands, and hooks to the latest CLI version. It replaces the `## Majlis Protocol` section in CLAUDE.md but preserves your config, database, synthesis docs, and any other CLAUDE.md content.
 
 ## License
 

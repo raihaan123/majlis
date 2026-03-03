@@ -121,9 +121,9 @@ export async function upgrade(_args: string[]): Promise<void> {
   if (fs.existsSync(claudeMdPath)) {
     const existing = fs.readFileSync(claudeMdPath, 'utf-8');
     if (existing.includes('## Majlis Protocol')) {
-      // Replace existing section: from "## Majlis Protocol" to next "## " or end
+      // Replace existing section: from "## Majlis Protocol" to next "## " heading or end
       const replaced = existing.replace(
-        /## Majlis Protocol[\s\S]*?(?=\n## [^M]|\n## $|$)/,
+        /## Majlis Protocol[\s\S]*?(?=\n## (?!#)(?!Majlis Protocol)|$)/,
         CLAUDE_MD_SECTION.trim(),
       );
       if (replaced !== existing) {
