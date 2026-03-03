@@ -43,6 +43,14 @@ import {
   getLastCompression,
   exportExperimentLineage,
   exportForCompressor,
+  insertNote,
+  getNotesBySession,
+  getNotesByExperiment,
+  getRecentNotes,
+  insertJournalEntry,
+  getJournalBySession,
+  getRecentJournal,
+  storeHypothesisFile,
 } from '../db/queries.js';
 import type Database from 'better-sqlite3';
 
@@ -53,21 +61,22 @@ beforeEach(() => {
 });
 
 describe('Migrations', () => {
-  it('creates all 14 tables', () => {
+  it('creates all 16 tables', () => {
     const tables = db.prepare(`
       SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
     `).all() as Array<{ name: string }>;
     const names = tables.map(t => t.name).sort();
     assert.deepEqual(names, [
       'challenges', 'compressions', 'dead_ends', 'decisions', 'doubts',
-      'experiments', 'findings', 'metrics', 'reframes', 'sessions',
-      'sub_type_failures', 'swarm_members', 'swarm_runs', 'verifications',
+      'experiments', 'findings', 'journal_entries', 'metrics', 'notes',
+      'reframes', 'sessions', 'sub_type_failures', 'swarm_members',
+      'swarm_runs', 'verifications',
     ]);
   });
 
-  it('sets user_version to 7', () => {
+  it('sets user_version to 8', () => {
     const version = db.pragma('user_version', { simple: true });
-    assert.equal(version, 7);
+    assert.equal(version, 8);
   });
 
   it('has builder_guidance column on experiments', () => {
@@ -92,7 +101,7 @@ describe('Migrations', () => {
   it('is idempotent', () => {
     const db2 = openTestDb();
     const version = db2.pragma('user_version', { simple: true });
-    assert.equal(version, 7);
+    assert.equal(version, 8);
   });
 });
 
@@ -496,5 +505,140 @@ describe('exportForCompressor() limit', () => {
     // Just verify it returns a string (the default limit is now 50K)
     const result = exportForCompressor(db);
     assert.ok(typeof result === 'string');
+  });
+});
+
+describe('Migration 008: notes, journal, hypothesis_file, provenance', () => {
+  it('creates notes table with correct columns', () => {
+    const cols = db.prepare('PRAGMA table_info(notes)').all() as Array<{ name: string }>;
+    const colNames = cols.map(c => c.name);
+    assert.ok(colNames.includes('id'));
+    assert.ok(colNames.includes('session_id'));
+    assert.ok(colNames.includes('experiment_id'));
+    assert.ok(colNames.includes('tag'));
+    assert.ok(colNames.includes('content'));
+    assert.ok(colNames.includes('created_at'));
+  });
+
+  it('creates journal_entries table with correct columns', () => {
+    const cols = db.prepare('PRAGMA table_info(journal_entries)').all() as Array<{ name: string }>;
+    const colNames = cols.map(c => c.name);
+    assert.ok(colNames.includes('id'));
+    assert.ok(colNames.includes('session_id'));
+    assert.ok(colNames.includes('content'));
+    assert.ok(colNames.includes('created_at'));
+  });
+
+  it('has hypothesis_file and provenance columns on experiments', () => {
+    const cols = db.prepare('PRAGMA table_info(experiments)').all() as Array<{ name: string }>;
+    const colNames = cols.map(c => c.name);
+    assert.ok(colNames.includes('hypothesis_file'));
+    assert.ok(colNames.includes('provenance'));
+  });
+});
+
+describe('Notes', () => {
+  it('inserts a note without session or experiment', () => {
+    const note = insertNote(db, null, null, null, 'test observation');
+    assert.ok(note.id);
+    assert.equal(note.content, 'test observation');
+    assert.equal(note.session_id, null);
+    assert.equal(note.experiment_id, null);
+    assert.equal(note.tag, null);
+  });
+
+  it('inserts a note with tag', () => {
+    const note = insertNote(db, null, null, 'hypothesis', 'cluster by distance');
+    assert.equal(note.tag, 'hypothesis');
+    assert.equal(note.content, 'cluster by distance');
+  });
+
+  it('inserts a note with session and experiment', () => {
+    const exp = createExperiment(db, 'note-test', 'exp/note', 'test', null, null);
+    const session = startSession(db, 'test session', exp.id);
+    const note = insertNote(db, session.id, exp.id, 'code-pointer', 'see line 42');
+    assert.equal(note.session_id, session.id);
+    assert.equal(note.experiment_id, exp.id);
+    assert.equal(note.tag, 'code-pointer');
+  });
+
+  it('queries notes by session', () => {
+    const session = startSession(db, 'notes session', null);
+    insertNote(db, session.id, null, null, 'note 1');
+    insertNote(db, session.id, null, null, 'note 2');
+    const notes = getNotesBySession(db, session.id);
+    assert.equal(notes.length, 2);
+  });
+
+  it('queries notes by experiment', () => {
+    const exp = createExperiment(db, 'note-exp', 'exp/note2', 'test', null, null);
+    insertNote(db, null, exp.id, null, 'exp note');
+    const notes = getNotesByExperiment(db, exp.id);
+    assert.equal(notes.length, 1);
+    assert.equal(notes[0].content, 'exp note');
+  });
+
+  it('queries recent notes with limit', () => {
+    insertNote(db, null, null, null, 'recent 1');
+    insertNote(db, null, null, null, 'recent 2');
+    insertNote(db, null, null, null, 'recent 3');
+    const notes = getRecentNotes(db, 2);
+    assert.equal(notes.length, 2);
+  });
+});
+
+describe('Journal', () => {
+  it('inserts a journal entry without session', () => {
+    const entry = insertJournalEntry(db, null, 'trying something');
+    assert.ok(entry.id);
+    assert.equal(entry.content, 'trying something');
+    assert.equal(entry.session_id, null);
+  });
+
+  it('inserts a journal entry with session', () => {
+    const session = startSession(db, 'journal session', null);
+    const entry = insertJournalEntry(db, session.id, 'it works');
+    assert.equal(entry.session_id, session.id);
+  });
+
+  it('queries journal by session', () => {
+    const session = startSession(db, 'journal q session', null);
+    insertJournalEntry(db, session.id, 'entry 1');
+    insertJournalEntry(db, session.id, 'entry 2');
+    const entries = getJournalBySession(db, session.id);
+    assert.equal(entries.length, 2);
+  });
+
+  it('queries recent journal entries with limit', () => {
+    insertJournalEntry(db, null, 'j1');
+    insertJournalEntry(db, null, 'j2');
+    insertJournalEntry(db, null, 'j3');
+    const entries = getRecentJournal(db, 2);
+    assert.equal(entries.length, 2);
+  });
+});
+
+describe('Hypothesis File', () => {
+  it('stores and retrieves hypothesis file path', () => {
+    const exp = createExperiment(db, 'hypo-test', 'exp/hypo', 'test', null, null);
+    storeHypothesisFile(db, exp.id, 'hypothesis.md');
+    const updated = getExperimentById(db, exp.id);
+    assert.equal(updated!.hypothesis_file, 'hypothesis.md');
+  });
+});
+
+describe('Compressor export includes notes and journal', () => {
+  it('includes pilot notes section', () => {
+    insertNote(db, null, null, 'observation', 'axis estimate is robust');
+    const result = exportForCompressor(db);
+    assert.ok(result.includes('Pilot Notes'));
+    assert.ok(result.includes('axis estimate is robust'));
+  });
+
+  it('includes journal section', () => {
+    insertJournalEntry(db, null, 'histogram is bimodal');
+    const result = exportForCompressor(db);
+    assert.ok(result.includes('Journal'));
+    assert.ok(result.includes('histogram is bimodal'));
   });
 });

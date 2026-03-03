@@ -39,6 +39,8 @@ export interface Experiment {
   depends_on: string | null;       // slug of prerequisite experiment
   context_files: string | null;    // JSON array of relative file paths
   gate_rejection_reason: string | null;  // set when gatekeeper rejects; cleared on override
+  hypothesis_file: string | null;  // path to structured hypothesis markdown
+  provenance: 'cycle' | 'catch-up' | 'absorb';
   created_at: string;
   updated_at: string;
 }
@@ -120,6 +122,22 @@ export interface Compression {
   session_count_since_last: number;
   synthesis_size_before: number;
   synthesis_size_after: number;
+  created_at: string;
+}
+
+export interface Note {
+  id: number;
+  session_id: number | null;
+  experiment_id: number | null;
+  tag: string | null;
+  content: string;
+  created_at: string;
+}
+
+export interface JournalEntry {
+  id: number;
+  session_id: number | null;
+  content: string;
   created_at: string;
 }
 

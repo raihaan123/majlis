@@ -30,6 +30,9 @@ import {
   insertMetric,
   updateDoubtResolution,
   exportExperimentLineage,
+  getNotesByExperiment,
+  getNotesBySession,
+  getActiveSession,
 } from '../db/queries.js';
 import { transition, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
@@ -157,6 +160,7 @@ async function doGate(db: ReturnType<typeof getDb>, exp: Experiment, root: strin
   }, root);
 
   ingestStructuredOutput(db, exp.id, result.structured);
+  printStepSummary('gate', result.structured);
 
   const decision = result.structured?.gate_decision ?? 'approve';
   const reason = result.structured?.reason ?? '';
@@ -249,6 +253,18 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
   const lineage = exportExperimentLineage(db, exp.sub_type);
   if (lineage) {
     taskPrompt += '\n\n' + lineage;
+  }
+
+  // Pilot notes injection — surface pilot observations to the builder
+  const pilotNotes = loadPilotNotes(db, exp.id);
+  if (pilotNotes) taskPrompt += pilotNotes;
+
+  // Structured hypothesis from --from-file
+  if (exp.hypothesis_file) {
+    const hypoContent = readFileOrEmpty(path.join(root, exp.hypothesis_file));
+    if (hypoContent) {
+      taskPrompt += `\n\n## Structured Hypothesis (from pilot)\n${hypoContent.slice(0, 8000)}`;
+    }
   }
 
   const result = await spawnAgent('builder', {
@@ -451,6 +467,7 @@ async function doChallenge(db: ReturnType<typeof getDb>, exp: Experiment, root: 
   }, root);
 
   ingestStructuredOutput(db, exp.id, result.structured);
+  printStepSummary('challenge', result.structured);
   if (result.truncated && !result.structured) {
     fmt.warn(`Adversary was truncated without structured output. Experiment stays at current status.`);
   } else {
@@ -496,6 +513,7 @@ async function doDoubt(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
   }, root);
 
   ingestStructuredOutput(db, exp.id, result.structured);
+  printStepSummary('doubt', result.structured);
   if (result.truncated && !result.structured) {
     fmt.warn(`Critic was truncated without structured output. Experiment stays at current status.`);
   } else {
@@ -641,6 +659,10 @@ async function doVerify(db: ReturnType<typeof getDb>, exp: Experiment, root: str
     verifierTaskPrompt += '\n\nNote: The builder\'s structured output was reconstructed by a secondary model (tier 3). Treat reported decisions with additional scrutiny.';
   }
 
+  // Pilot notes injection — surface pilot observations to the verifier
+  const verifierPilotNotes = loadPilotNotes(db, exp.id);
+  if (verifierPilotNotes) verifierTaskPrompt += verifierPilotNotes;
+
   const result = await spawnAgent('verifier', {
     experiment: {
       id: exp.id,
@@ -659,6 +681,7 @@ async function doVerify(db: ReturnType<typeof getDb>, exp: Experiment, root: str
   }, root);
 
   ingestStructuredOutput(db, exp.id, result.structured);
+  printStepSummary('verify', result.structured);
 
   if (result.truncated && !result.structured) {
     fmt.warn(`Verifier was truncated without structured output. Experiment stays at 'verifying'.`);
@@ -790,6 +813,28 @@ function loadExperimentContext(exp: Experiment, root: string): string {
 }
 
 /**
+ * Load pilot notes for an experiment + active session.
+ * Returns formatted section string or empty string if no notes.
+ */
+function loadPilotNotes(db: ReturnType<typeof getDb>, experimentId: number): string {
+  const expNotes = getNotesByExperiment(db, experimentId);
+  const session = getActiveSession(db);
+  const sessionNotes = session ? getNotesBySession(db, session.id) : [];
+
+  // Deduplicate — session notes may also be experiment notes
+  const seenIds = new Set(expNotes.map(n => n.id));
+  const allNotes = [...expNotes, ...sessionNotes.filter(n => !seenIds.has(n.id))].slice(-10);
+
+  if (allNotes.length === 0) return '';
+
+  let section = '\n\n## Pilot Notes\n';
+  for (const n of allNotes) {
+    section += `- ${n.tag ? `[${n.tag}] ` : ''}${n.content}\n`;
+  }
+  return section;
+}
+
+/**
  * Relative path to an experiment's doc file: docs/experiments/{NNN}-{slug}.md
  */
 export function expDocRelPath(exp: Experiment): string {
@@ -807,6 +852,47 @@ function resolveExperimentArg(db: ReturnType<typeof getDb>, args: string[]): Exp
     if (!exp) throw new Error('No active experiments. Run `majlis new "hypothesis"` first.');
   }
   return exp;
+}
+
+/**
+ * Print a concise 3-5 line summary after each cycle step.
+ * Designed for glancing at T2 to decide whether to investigate in T1.
+ */
+function printStepSummary(step: string, structured: StructuredOutput | null): void {
+  if (!structured) return;
+
+  if (step === 'gate') {
+    const decision = structured.gate_decision ?? 'approve';
+    const reason = structured.reason ?? '';
+    fmt.header(`Gate: ${decision}`);
+    if (reason) console.log(`  ${reason.slice(0, 150)}`);
+  }
+
+  if (step === 'doubt' && structured.doubts) {
+    const critical = structured.doubts.filter(d => d.severity === 'critical').length;
+    const moderate = structured.doubts.filter(d => d.severity === 'moderate').length;
+    const minor = structured.doubts.filter(d => d.severity === 'minor').length;
+    fmt.header(`Doubt Summary: ${structured.doubts.length} doubt(s) — ${critical} critical, ${moderate} moderate, ${minor} minor`);
+    for (const d of structured.doubts.slice(0, 3)) {
+      console.log(`  [${d.severity}] ${d.claim_doubted.slice(0, 100)}`);
+    }
+  }
+
+  if (step === 'challenge' && structured.challenges) {
+    fmt.header(`Challenge Summary: ${structured.challenges.length} challenge(s)`);
+    for (const c of structured.challenges.slice(0, 3)) {
+      console.log(`  ${c.description.slice(0, 100)}`);
+    }
+  }
+
+  if (step === 'verify' && structured.grades) {
+    const grades = structured.grades.map(g => g.grade);
+    const worst = ['rejected', 'weak', 'good', 'sound'].find(g => grades.includes(g)) ?? grades[0] ?? 'unknown';
+    fmt.header(`Verification Summary: overall=${worst}`);
+    for (const g of structured.grades) {
+      console.log(`  ${g.component}: ${fmt.gradeColor(g.grade)}`);
+    }
+  }
 }
 
 /**

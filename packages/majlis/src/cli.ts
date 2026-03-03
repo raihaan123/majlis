@@ -153,6 +153,26 @@ async function main(): Promise<void> {
         await resync(rest);
         break;
       }
+      case 'note': {
+        const { note } = await import('./commands/note.js');
+        await note(rest);
+        break;
+      }
+      case 'journal': {
+        const { journal } = await import('./commands/journal.js');
+        await journal(rest);
+        break;
+      }
+      case 'brief': {
+        const { brief } = await import('./commands/brief.js');
+        await brief(rest, isJson);
+        break;
+      }
+      case 'catch-up': {
+        const { catchUp } = await import('./commands/catchup.js');
+        await catchUp(rest);
+        break;
+      }
       default:
         console.error(`Unknown command: ${command}`);
         printHelp();
@@ -183,10 +203,15 @@ Experiments:
     --sub-type TYPE          Classify by problem sub-type
     --depends-on SLUG        Block building until dependency is merged
     --context FILE,FILE      Inject domain-specific docs into agent context
+    --skip-gate              Skip gatekeeper (pilot-verified hypothesis)
+    --from-file FILE         Inject structured hypothesis from markdown file
   baseline                   Capture metrics snapshot (before)
   measure                    Capture metrics snapshot (after)
   compare [--json]           Compare before/after, detect regressions
   revert                     Revert experiment, log to dead-end
+  catch-up "description"     Create experiment retroactively from manual work
+    --diff RANGE             Git diff range (required, e.g. HEAD~3..HEAD)
+    --sub-type TYPE          Classify by problem sub-type
 
 Cycle:
   next [experiment] [--auto] Determine and execute next cycle step
@@ -218,6 +243,13 @@ Audit:
 Sessions:
   session start "intent"     Declare session intent
   session end                Log accomplished/unfinished/fragility
+
+Pilot:
+  note "text"                Save an observation to the DB
+    --tag TAG                Tag the note (hypothesis, code-pointer, etc.)
+    --experiment SLUG        Attach to a specific experiment
+  journal "text"             Timestamped breadcrumb during manual hacking
+  brief [--plain] [--short]  Pilot-friendly context dump for Claude Code
 
 Orchestration:
   run "goal"                 Autonomous orchestration until goal met

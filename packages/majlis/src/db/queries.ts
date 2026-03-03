@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import type {
   Experiment, Decision, MetricSnapshot, DeadEnd,
   Verification, Doubt, SubTypeFailure, Session, Compression,
+  Note, JournalEntry,
 } from '../types.js';
 
 /**
@@ -511,6 +512,64 @@ export function updateSwarmMember(
   `).run(finalStatus, overallGrade, costUsd, error, swarmRunId, slug);
 }
 
+// ── Notes ──────────────────────────────────────────────────
+
+export function insertNote(
+  db: Database.Database,
+  sessionId: number | null,
+  experimentId: number | null,
+  tag: string | null,
+  content: string,
+): Note {
+  const stmt = db.prepare(`
+    INSERT INTO notes (session_id, experiment_id, tag, content) VALUES (?, ?, ?, ?)
+  `);
+  const result = stmt.run(sessionId, experimentId, tag, content);
+  return db.prepare('SELECT * FROM notes WHERE id = ?').get(result.lastInsertRowid) as Note;
+}
+
+export function getNotesBySession(db: Database.Database, sessionId: number): Note[] {
+  return db.prepare('SELECT * FROM notes WHERE session_id = ? ORDER BY created_at').all(sessionId) as Note[];
+}
+
+export function getNotesByExperiment(db: Database.Database, experimentId: number): Note[] {
+  return db.prepare('SELECT * FROM notes WHERE experiment_id = ? ORDER BY created_at').all(experimentId) as Note[];
+}
+
+export function getRecentNotes(db: Database.Database, limit: number = 20): Note[] {
+  return db.prepare('SELECT * FROM notes ORDER BY created_at DESC LIMIT ?').all(limit) as Note[];
+}
+
+// ── Journal ────────────────────────────────────────────────
+
+export function insertJournalEntry(
+  db: Database.Database,
+  sessionId: number | null,
+  content: string,
+): JournalEntry {
+  const stmt = db.prepare(`
+    INSERT INTO journal_entries (session_id, content) VALUES (?, ?)
+  `);
+  const result = stmt.run(sessionId, content);
+  return db.prepare('SELECT * FROM journal_entries WHERE id = ?').get(result.lastInsertRowid) as JournalEntry;
+}
+
+export function getJournalBySession(db: Database.Database, sessionId: number): JournalEntry[] {
+  return db.prepare('SELECT * FROM journal_entries WHERE session_id = ? ORDER BY created_at').all(sessionId) as JournalEntry[];
+}
+
+export function getRecentJournal(db: Database.Database, limit: number = 50): JournalEntry[] {
+  return db.prepare('SELECT * FROM journal_entries ORDER BY created_at DESC LIMIT ?').all(limit) as JournalEntry[];
+}
+
+// ── Hypothesis File ────────────────────────────────────────
+
+export function storeHypothesisFile(db: Database.Database, experimentId: number, filePath: string): void {
+  db.prepare(`
+    UPDATE experiments SET hypothesis_file = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(filePath, experimentId);
+}
+
 // ── Compressor Export ───────────────────────────────────────
 
 /**
@@ -582,6 +641,32 @@ export function exportForCompressor(db: Database.Database, maxLength: number = 5
     sections.push('## Unresolved Doubts');
     for (const d of unresolvedDoubts) {
       sections.push(`- [${d.severity}] ${d.claim_doubted} (exp: ${d.experiment_slug})`);
+    }
+  }
+
+  // Pilot notes — fold these into the narrative, not as a raw list
+  const notes = db.prepare(`
+    SELECT n.*, s.intent as session_intent FROM notes n
+    LEFT JOIN sessions s ON n.session_id = s.id
+    ORDER BY n.created_at
+  `).all() as Array<Note & { session_intent: string | null }>;
+  if (notes.length > 0) {
+    sections.push('\n## Pilot Notes (fold into narrative — these are human/pilot observations)');
+    for (const n of notes) {
+      sections.push(`- ${n.tag ? `[${n.tag}] ` : ''}${n.content}`);
+    }
+  }
+
+  // Journal entries — fold into timeline narrative
+  const journal = db.prepare(`
+    SELECT j.*, s.intent as session_intent FROM journal_entries j
+    LEFT JOIN sessions s ON j.session_id = s.id
+    ORDER BY j.created_at
+  `).all() as Array<JournalEntry & { session_intent: string | null }>;
+  if (journal.length > 0) {
+    sections.push('\n## Journal (fold into timeline — breadcrumbs from manual hacking sessions)');
+    for (const j of journal) {
+      sections.push(`- [${j.created_at}] ${j.content}`);
     }
   }
 
@@ -768,6 +853,37 @@ export function exportForDiagnostician(db: Database.Database, maxLength: number 
     sections.push('\n## Scout Findings');
     for (const f of findings) {
       sections.push(`- ${f.slug}: ${f.approach} (${f.source}) ${f.contradicts_current ? '[CONTRADICTS CURRENT]' : ''}`);
+    }
+  }
+
+  // Pilot notes with experiment/session context
+  const notes = db.prepare(`
+    SELECT n.*, e.slug as exp_slug, s.intent as session_intent
+    FROM notes n
+    LEFT JOIN experiments e ON n.experiment_id = e.id
+    LEFT JOIN sessions s ON n.session_id = s.id
+    ORDER BY n.created_at
+  `).all() as Array<Note & { exp_slug: string | null; session_intent: string | null }>;
+  if (notes.length > 0) {
+    sections.push('\n## Pilot Notes');
+    for (const n of notes) {
+      const ctx = n.exp_slug ? ` (exp: ${n.exp_slug})` : n.session_intent ? ` (session: ${n.session_intent})` : '';
+      sections.push(`- ${n.tag ? `[${n.tag}] ` : ''}${n.content}${ctx}`);
+    }
+  }
+
+  // Journal entries
+  const journal = db.prepare(`
+    SELECT j.*, s.intent as session_intent
+    FROM journal_entries j
+    LEFT JOIN sessions s ON j.session_id = s.id
+    ORDER BY j.created_at
+  `).all() as Array<JournalEntry & { session_intent: string | null }>;
+  if (journal.length > 0) {
+    sections.push('\n## Journal Entries');
+    for (const j of journal) {
+      const ctx = j.session_intent ? ` (session: ${j.session_intent})` : '';
+      sections.push(`- [${j.created_at}] ${j.content}${ctx}`);
     }
   }
 

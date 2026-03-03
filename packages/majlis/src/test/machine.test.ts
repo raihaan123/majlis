@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { ExperimentStatus, TRANSITIONS, GRADE_ORDER } from '../state/types.js';
+import { ExperimentStatus, TRANSITIONS, GRADE_ORDER, ADMIN_TRANSITIONS } from '../state/types.js';
 import { transition, validNext, isTerminal, determineNextStep } from '../state/machine.js';
 import type { Experiment } from '../types.js';
 
@@ -17,6 +17,8 @@ function makeExp(overrides: Partial<Experiment> = {}): Experiment {
     depends_on: null,
     context_files: null,
     gate_rejection_reason: null,
+    hypothesis_file: null,
+    provenance: 'cycle',
     created_at: '2024-01-01',
     updated_at: '2024-01-01',
     ...overrides,
@@ -258,5 +260,23 @@ describe('determineNextStep()', () => {
 describe('GRADE_ORDER', () => {
   it('is ordered worst to best', () => {
     assert.deepEqual(GRADE_ORDER, ['rejected', 'weak', 'good', 'sound']);
+  });
+});
+
+describe('ADMIN_TRANSITIONS bootstrap', () => {
+  it('allows classified → reframed', () => {
+    assert.ok(ADMIN_TRANSITIONS.bootstrap(ExperimentStatus.CLASSIFIED, ExperimentStatus.REFRAMED));
+  });
+
+  it('allows classified → built (for catch-up)', () => {
+    assert.ok(ADMIN_TRANSITIONS.bootstrap(ExperimentStatus.CLASSIFIED, ExperimentStatus.BUILT));
+  });
+
+  it('rejects classified → merged', () => {
+    assert.ok(!ADMIN_TRANSITIONS.bootstrap(ExperimentStatus.CLASSIFIED, ExperimentStatus.MERGED));
+  });
+
+  it('rejects gated → built', () => {
+    assert.ok(!ADMIN_TRANSITIONS.bootstrap(ExperimentStatus.GATED, ExperimentStatus.BUILT));
   });
 });

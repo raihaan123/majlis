@@ -53,7 +53,8 @@ export const ADMIN_TRANSITIONS: Record<AdminReason, (current: ExperimentStatus, 
   error_recovery: (current, target) =>
     target === ExperimentStatus.DEAD_END && !isTerminalStatus(current),
   bootstrap: (current, target) =>
-    current === ExperimentStatus.CLASSIFIED && target === ExperimentStatus.REFRAMED,
+    (current === ExperimentStatus.CLASSIFIED && target === ExperimentStatus.REFRAMED) ||
+    (current === ExperimentStatus.CLASSIFIED && target === ExperimentStatus.BUILT),
 };
 
 /** Check if a status is terminal (no valid outgoing transitions). */

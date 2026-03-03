@@ -50,6 +50,13 @@ npm test             # runs tests in both consumer packages
 - **Truncation recovery via extraction:** When a builder is truncated (hits max turns), the framework runs `extractStructuredData` on the full truncated output instead of spawning a separate recovery agent. If a `<!-- majlis-json -->` block is found, the build proceeds normally; otherwise, the tail of the output is stored as guidance and the experiment stays at `building` (Tradition 3: use the strongest available chain, not a weaker intermediary).
 - **Intra-experiment constraint crystallization:** When `weak` resolve cycles back to building, guidance is **accumulated** across iterations (not overwritten). Components graded `rejected` within an overall `weak` experiment are registered as dead-ends immediately. The synthesiser can flag provably dead approaches with `[DEAD-APPROACH]` markers, which are also inserted as dead-ends (Tradition 3: chain provenance — insights must survive across iterations).
 - **Centralized ANSI output:** All terminal formatting goes through `src/output/format.ts`. Supports `NO_COLOR` env var and TTY detection. `shared/validation.ts` has its own local `NO_COLOR` gate (no cross-package dependency).
+- **Pilot notes:** `majlis note "text" [--tag TAG] [--experiment SLUG]` stores observations in the DB. Notes are injected into builder and verifier agent contexts. Works with or without an active session.
+- **Journal entries:** `majlis journal "text"` stores timestamped breadcrumbs during manual hacking sessions. Folded into catch-up experiment docs and compressor exports.
+- **Pilot brief:** `majlis brief [--plain] [--short] [--json]` outputs a pilot-optimized context dump: experiment state, dead-ends, doubts/challenges, notes, metrics, session intent. Designed for copy-paste into Claude Code.
+- **Catch-up experiments:** `majlis catch-up "description" --diff RANGE [--sub-type TYPE]` retroactively creates experiments from manual work. Requires `--diff` flag. Records provenance as `catch-up`, auto-generates experiment doc from git diff, admin-transitions to `built`. Record-only — user manually triggers doubt/verify/resolve.
+- **Hypothesis files:** `majlis new --from-file hypothesis.md` reads structured hypothesis markdown and injects it into the experiment doc and builder context.
+- **Skip gate:** `majlis new --skip-gate` auto-transitions to `gated` for pilot-verified hypotheses.
+- **Post-step summaries:** After each cycle step (gate, doubt, challenge, verify), a 3-5 line actionable summary is printed to stdout: severity counts, top claims, grade breakdown.
 
 ## Canonical Reference
 - PRD: See `FOUNDATIONS.md` for intellectual principles.

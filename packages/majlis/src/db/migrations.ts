@@ -212,6 +212,34 @@ const migrations: Migration[] = [
       ALTER TABLE experiments ADD COLUMN gate_rejection_reason TEXT;
     `);
   },
+
+  // Migration 008: v7 → v8 — Pilot integration: notes, journal, hypothesis file, provenance
+  (db) => {
+    db.exec(`
+      CREATE TABLE notes (
+        id INTEGER PRIMARY KEY,
+        session_id INTEGER REFERENCES sessions(id),
+        experiment_id INTEGER REFERENCES experiments(id),
+        tag TEXT,
+        content TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX idx_notes_session ON notes(session_id);
+      CREATE INDEX idx_notes_experiment ON notes(experiment_id);
+
+      CREATE TABLE journal_entries (
+        id INTEGER PRIMARY KEY,
+        session_id INTEGER REFERENCES sessions(id),
+        content TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX idx_journal_session ON journal_entries(session_id);
+
+      ALTER TABLE experiments ADD COLUMN hypothesis_file TEXT;
+      ALTER TABLE experiments ADD COLUMN provenance TEXT DEFAULT 'cycle'
+        CHECK(provenance IN ('cycle', 'catch-up', 'absorb'));
+    `);
+  },
 ];
 
 /**

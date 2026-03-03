@@ -10,6 +10,8 @@ import {
   clearGateRejection,
   listStructuralDeadEnds,
   listStructuralDeadEndsBySubType,
+  storeHypothesisFile,
+  updateExperimentStatus,
 } from '../db/queries.js';
 import { adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
@@ -68,6 +70,8 @@ export async function newExperiment(args: string[]): Promise<void> {
   const dependsOn = getFlagValue(args, '--depends-on') ?? null;
   const contextArg = getFlagValue(args, '--context') ?? null;
   const contextFiles = contextArg ? contextArg.split(',').map(f => f.trim()) : null;
+  const skipGate = args.includes('--skip-gate');
+  const fromFile = getFlagValue(args, '--from-file') ?? null;
 
   // Validate dependency exists if specified
   if (dependsOn) {
@@ -92,13 +96,27 @@ export async function newExperiment(args: string[]): Promise<void> {
   const templatePath = path.join(docsDir, '_TEMPLATE.md');
   if (fs.existsSync(templatePath)) {
     const template = fs.readFileSync(templatePath, 'utf-8');
-    const logContent = template
+    let logContent = template
       .replace(/\{\{title\}\}/g, hypothesis)
       .replace(/\{\{hypothesis\}\}/g, hypothesis)
       .replace(/\{\{branch\}\}/g, branch)
       .replace(/\{\{status\}\}/g, 'classified')
       .replace(/\{\{sub_type\}\}/g, subType ?? 'unclassified')
       .replace(/\{\{date\}\}/g, new Date().toISOString().split('T')[0]);
+
+    // --from-file: inject structured hypothesis into experiment doc
+    if (fromFile) {
+      const hypoPath = path.join(root, fromFile);
+      if (fs.existsSync(hypoPath)) {
+        const hypoContent = fs.readFileSync(hypoPath, 'utf-8');
+        logContent += '\n\n## Structured Hypothesis (from pilot)\n\n' + hypoContent;
+        storeHypothesisFile(db, exp.id, fromFile);
+        fmt.info(`Hypothesis file: ${fromFile}`);
+      } else {
+        fmt.warn(`Hypothesis file not found: ${fromFile}`);
+      }
+    }
+
     const logPath = path.join(root, docRelPath);
     fs.writeFileSync(logPath, logContent);
     fmt.info(`Created experiment log: ${docRelPath}`);
@@ -115,6 +133,12 @@ export async function newExperiment(args: string[]): Promise<void> {
     } catch (err) {
       fmt.warn('Auto-baseline failed — run `majlis baseline` manually.');
     }
+  }
+
+  // --skip-gate: auto-transition to gated (pilot already verified)
+  if (skipGate) {
+    updateExperimentStatus(db, exp.id, 'gated');
+    fmt.success(`Gate skipped (pilot-verified). Run \`majlis build\` next.`);
   }
 }
 
