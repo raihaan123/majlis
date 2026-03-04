@@ -13,6 +13,7 @@ import {
   incrementSubTypeFailure,
   insertDeadEnd,
   insertVerification,
+  cascadeChainInvalidation,
 } from './db/queries.js';
 import { compareMetrics, checkGateViolations } from './metrics.js';
 import { loadConfig } from './config.js';
@@ -251,6 +252,8 @@ export async function resolve(
           incrementSubTypeFailure(db, exp.sub_type, exp.id, 'rejected');
         }
       })();
+      const weakened = cascadeChainInvalidation(db, exp.slug);
+      if (weakened > 0) fmt.warn(`Weakened chain: ${weakened} downstream experiment(s) depend on ${exp.slug}.`);
       fmt.info(`Experiment ${exp.slug} DEAD-ENDED (rejected). Constraint recorded.`);
       break;
     }
@@ -395,6 +398,8 @@ export async function resolveDbOnly(
           incrementSubTypeFailure(db, exp.sub_type, exp.id, 'rejected');
         }
       })();
+      const weakened = cascadeChainInvalidation(db, exp.slug);
+      if (weakened > 0) fmt.warn(`Weakened chain: ${weakened} downstream experiment(s) depend on ${exp.slug}.`);
       fmt.info(`Experiment ${exp.slug} DEAD-ENDED (rejected). Constraint recorded.`);
       break;
     }

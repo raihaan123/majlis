@@ -104,6 +104,11 @@ export interface StructuredOutput {
     structural_constraint: string;
     category: 'structural' | 'procedural';
   };
+  // Audit objective rewrite proposal (Feature 3: Dynamic Objective Falsification)
+  objective_rewrite?: {
+    proposed_objective: string;
+    reason: string;
+  };
 }
 
 export interface AgentContext {

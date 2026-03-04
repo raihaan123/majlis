@@ -8,6 +8,8 @@ import {
   getSessionsSinceCompression,
   getAllCircuitBreakerStates,
   listAllDecisions,
+  getVerificationsByExperiment,
+  getPendingAuditProposal,
 } from '../db/queries.js';
 import type { MajlisConfig } from '../types.js';
 import { loadConfig } from '../config.js';
@@ -94,6 +96,37 @@ export async function status(isJson: boolean): Promise<void> {
       cb.tripped ? fmt.red('TRIPPED') : fmt.green('OK'),
     ]);
     console.log(fmt.table(['Sub-Type', 'Failures', 'Status'], cbRows));
+  }
+
+  // Weakened chain warnings
+  const weakenedExps = experiments.filter(e => e.chain_weakened_by);
+  if (weakenedExps.length > 0) {
+    console.log();
+    for (const e of weakenedExps) {
+      fmt.warn(`${e.slug} depends on ${e.chain_weakened_by} (dead-ended)`);
+    }
+    console.log(`  Use \`majlis revert <slug>\` to abandon, or proceed at your own risk.`);
+  }
+
+  // Human verification pause display
+  if (config.cycle.require_human_verify) {
+    const verifiedExps = experiments.filter(e => e.status === 'verified');
+    for (const e of verifiedExps) {
+      const grades = getVerificationsByExperiment(db, e.id);
+      console.log(`\n  ${fmt.bold(e.slug)}: awaiting human review (verified)`);
+      for (const g of grades) {
+        console.log(`    ${g.component}: ${fmt.gradeColor(g.grade)}${g.notes ? ` — ${g.notes}` : ''}`);
+      }
+      console.log(`  Run \`majlis resolve\` or \`majlis resolve --reject\``);
+    }
+  }
+
+  // Pending audit proposal
+  const pendingProposal = getPendingAuditProposal(db);
+  if (pendingProposal) {
+    console.log();
+    fmt.warn(`Pending objective rewrite: "${pendingProposal.proposed_objective}"`);
+    console.log(`  Run \`majlis audit --accept\` or \`majlis audit --reject\``);
   }
 
   // Judgment decisions

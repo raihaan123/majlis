@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type {
   Experiment, Decision, MetricSnapshot, DeadEnd,
   Verification, Doubt, SubTypeFailure, Session, Compression,
-  Note, JournalEntry,
+  Note, JournalEntry, ObjectiveHistoryRow, AuditProposal,
 } from '../types.js';
 
 /**
@@ -92,6 +92,53 @@ export function clearGateRejection(db: Database.Database, experimentId: number):
   db.prepare(`
     UPDATE experiments SET gate_rejection_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?
   `).run(experimentId);
+}
+
+// ── Chain Invalidation ──────────────────────────────────────
+
+/** BFS to find all downstream dependents of a slug (direct + transitive). Skips terminal. */
+export function findDependents(db: Database.Database, slug: string): Experiment[] {
+  const dependents: Experiment[] = [];
+  const visited = new Set<string>();
+  const queue = [slug];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    const rows = db.prepare(
+      `SELECT * FROM experiments WHERE depends_on = ? AND status NOT IN ('merged', 'dead_end')`
+    ).all(current) as Experiment[];
+
+    for (const row of rows) {
+      dependents.push(row);
+      queue.push(row.slug);
+    }
+  }
+
+  return dependents;
+}
+
+export function setChainWeakened(db: Database.Database, experimentId: number, slug: string): void {
+  db.prepare(`
+    UPDATE experiments SET chain_weakened_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(slug, experimentId);
+}
+
+export function clearChainWeakened(db: Database.Database, experimentId: number): void {
+  db.prepare(`
+    UPDATE experiments SET chain_weakened_by = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(experimentId);
+}
+
+/** Flag all downstream dependents of a dead-ended slug. Returns count of weakened experiments. */
+export function cascadeChainInvalidation(db: Database.Database, slug: string): number {
+  const dependents = findDependents(db, slug);
+  for (const dep of dependents) {
+    setChainWeakened(db, dep.id, slug);
+  }
+  return dependents.length;
 }
 
 // ── Decisions ────────────────────────────────────────────────
@@ -568,6 +615,51 @@ export function storeHypothesisFile(db: Database.Database, experimentId: number,
   db.prepare(`
     UPDATE experiments SET hypothesis_file = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
   `).run(filePath, experimentId);
+}
+
+// ── Objective History ────────────────────────────────────────
+
+export function insertObjectiveHistory(
+  db: Database.Database,
+  objectiveText: string,
+  previousText: string | null,
+  reason: string,
+  source: 'manual' | 'audit',
+): void {
+  db.prepare(`
+    INSERT INTO objective_history (objective_text, previous_text, reason, source)
+    VALUES (?, ?, ?, ?)
+  `).run(objectiveText, previousText, reason, source);
+}
+
+export function getObjectiveHistory(db: Database.Database): ObjectiveHistoryRow[] {
+  return db.prepare('SELECT * FROM objective_history ORDER BY created_at').all() as ObjectiveHistoryRow[];
+}
+
+// ── Audit Proposals ─────────────────────────────────────────
+
+export function insertAuditProposal(
+  db: Database.Database,
+  proposedObjective: string,
+  reason: string,
+  auditOutput: string | null,
+): void {
+  db.prepare(`
+    INSERT INTO audit_proposals (proposed_objective, reason, audit_output)
+    VALUES (?, ?, ?)
+  `).run(proposedObjective, reason, auditOutput);
+}
+
+export function getPendingAuditProposal(db: Database.Database): AuditProposal | null {
+  return db.prepare(
+    `SELECT * FROM audit_proposals WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1`
+  ).get() as AuditProposal | null;
+}
+
+export function resolveAuditProposal(db: Database.Database, id: number, status: 'accepted' | 'rejected'): void {
+  db.prepare(`
+    UPDATE audit_proposals SET status = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(status, id);
 }
 
 // ── Compressor Export ───────────────────────────────────────

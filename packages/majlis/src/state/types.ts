@@ -39,7 +39,7 @@ export type Grade = 'sound' | 'good' | 'weak' | 'rejected';
 export const GRADE_ORDER: Grade[] = ['rejected', 'weak', 'good', 'sound'];
 
 // Admin (force) transition reasons — bypass normal TRANSITIONS for recovery / bootstrap
-export type AdminReason = 'revert' | 'circuit_breaker' | 'error_recovery' | 'bootstrap';
+export type AdminReason = 'revert' | 'circuit_breaker' | 'error_recovery' | 'bootstrap' | 'objective_reset';
 
 /**
  * Allowed admin transitions per reason.
@@ -55,6 +55,8 @@ export const ADMIN_TRANSITIONS: Record<AdminReason, (current: ExperimentStatus, 
   bootstrap: (current, target) =>
     (current === ExperimentStatus.CLASSIFIED && target === ExperimentStatus.REFRAMED) ||
     (current === ExperimentStatus.CLASSIFIED && target === ExperimentStatus.BUILT),
+  objective_reset: (current, target) =>
+    target === ExperimentStatus.CLASSIFIED && !isTerminalStatus(current),
 };
 
 /** Check if a status is terminal (no valid outgoing transitions). */

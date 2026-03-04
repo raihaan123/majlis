@@ -23,6 +23,7 @@ export interface MajlisConfig {
     require_doubt_before_verify: boolean;
     require_challenge_before_verify: boolean;
     auto_baseline_on_new_experiment: boolean;
+    require_human_verify: boolean;
   };
   models: Record<string, string>;
 }
@@ -41,6 +42,7 @@ export interface Experiment {
   gate_rejection_reason: string | null;  // set when gatekeeper rejects; cleared on override
   hypothesis_file: string | null;  // path to structured hypothesis markdown
   provenance: 'cycle' | 'catch-up' | 'absorb';
+  chain_weakened_by: string | null;  // slug of dead-ended upstream dependency
   created_at: string;
   updated_at: string;
 }
@@ -139,6 +141,25 @@ export interface JournalEntry {
   session_id: number | null;
   content: string;
   created_at: string;
+}
+
+export interface ObjectiveHistoryRow {
+  id: number;
+  objective_text: string;
+  previous_text: string | null;
+  reason: string;
+  source: 'manual' | 'audit';
+  created_at: string;
+}
+
+export interface AuditProposal {
+  id: number;
+  proposed_objective: string;
+  reason: string;
+  audit_output: string | null;
+  status: 'pending' | 'accepted' | 'rejected';
+  created_at: string;
+  resolved_at: string | null;
 }
 
 export interface MetricComparison {

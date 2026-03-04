@@ -57,6 +57,9 @@ npm test             # runs tests in both consumer packages
 - **Hypothesis files:** `majlis new --from-file hypothesis.md` reads structured hypothesis markdown and injects it into the experiment doc and builder context.
 - **Skip gate:** `majlis new --skip-gate` auto-transitions to `gated` for pilot-verified hypotheses.
 - **Post-step summaries:** After each cycle step (gate, doubt, challenge, verify), a 3-5 line actionable summary is printed to stdout: severity counts, top claims, grade breakdown.
+- **Isnad chain invalidation:** When an experiment is dead-ended, all downstream dependents (direct + transitive via `depends_on`) are flagged with `chain_weakened_by`. `majlis status` shows chain warnings. Auto mode (`--auto`, `run`) auto-dead-ends weakened experiments. Manual mode warns but doesn't block.
+- **Human verification pause:** `config.cycle.require_human_verify` (default false). When true, experiments pause at `verified` instead of auto-resolving. `majlis resolve` proceeds normally; `majlis resolve --reject [--reason "text"]` forces dead-end with human override.
+- **Dynamic objective falsification:** When the audit agent proposes an objective rewrite, it's stored as a pending `audit_proposals` row. `majlis audit --accept` updates config.json, records in `objective_history`, and resets active experiments to `classified` via `objective_reset` admin transition. `majlis audit --reject` dismisses the proposal.
 
 ## Canonical Reference
 - PRD: See `FOUNDATIONS.md` for intellectual principles.

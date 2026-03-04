@@ -222,6 +222,8 @@ Cycle:
   verify [experiment]        Spawn verifier agent
   gate [experiment]          Spawn gatekeeper agent
   resolve [experiment]       Route based on verification grades
+    --reject                 Force dead-end (human override)
+    --reason "text"          Reason for rejection (with --reject)
   compress                   Spawn compressor agent
 
 Classification:
@@ -238,6 +240,8 @@ Queries:
 
 Audit:
   audit "objective"          Maqasid check — is the frame right?
+    --accept                 Accept pending objective rewrite
+    --reject                 Reject pending objective rewrite
   diagnose ["focus area"]    Deep diagnosis — root causes, patterns, gaps
 
 Sessions:

@@ -10,6 +10,7 @@ import {
   getSessionsSinceCompression,
   createExperiment,
   getExperimentBySlug,
+  cascadeChainInvalidation,
 } from '../db/queries.js';
 import { isTerminal, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
@@ -126,6 +127,8 @@ export async function run(args: string[]): Promise<void> {
         adminTransitionAndPersist(db, afterStep.id, afterStep.status as ExperimentStatus,
           ExperimentStatus.DEAD_END, 'revert');
         handleDeadEndGit(afterStep, root);
+        const w1 = cascadeChainInvalidation(db, afterStep.slug);
+        if (w1 > 0) fmt.warn(`Weakened chain: ${w1} downstream experiment(s) depend on ${afterStep.slug}.`);
         continue;
       }
     } catch (err) {
@@ -137,6 +140,8 @@ export async function run(args: string[]): Promise<void> {
           `Process failure: ${message}`, exp.sub_type, 'procedural');
         adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'error_recovery');
         handleDeadEndGit(exp, root);
+        const w2 = cascadeChainInvalidation(db, exp.slug);
+        if (w2 > 0) fmt.warn(`Weakened chain: ${w2} downstream experiment(s) depend on ${exp.slug}.`);
       } catch (innerErr) {
         const innerMsg = innerErr instanceof Error ? innerErr.message : String(innerErr);
         fmt.warn(`Could not record dead-end: ${innerMsg}`);

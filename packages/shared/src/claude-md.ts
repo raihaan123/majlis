@@ -28,6 +28,18 @@ See \`docs/workflow.md\` for the full cycle. See \`.claude/agents/\` for role de
 - \`majlis journal "text"\` — timestamped breadcrumbs during manual hacking.
 - \`majlis catch-up "description" --diff HEAD~3..HEAD\` — create experiment retroactively from manual work.
 
+### Chain Integrity
+- If an experiment you depend on is dead-ended, your experiment is flagged as "weakened chain".
+- Run \`majlis status\` to see chain warnings. Revert or proceed at your own risk.
+
+### Verification Review
+- If \`require_human_verify\` is enabled, experiments pause at \`verified\` for human review.
+- Run \`majlis resolve\` to proceed or \`majlis resolve --reject\` to dead-end.
+
+### Purpose Audit
+- Circuit breaker trips (3+ failures on a sub-type) trigger a Maqasid Check.
+- If the audit proposes an objective rewrite, run \`majlis audit --accept\` or \`--reject\`.
+
 ### Compression Trigger
 - Run \`majlis status\` — it will warn when compression is due.
 

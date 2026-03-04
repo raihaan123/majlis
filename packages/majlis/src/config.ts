@@ -12,6 +12,7 @@ const DEFAULT_CONFIG: MajlisConfig = {
     require_doubt_before_verify: true,
     require_challenge_before_verify: false,
     auto_baseline_on_new_experiment: true,
+    require_human_verify: false,
   },
   models: {},
 };

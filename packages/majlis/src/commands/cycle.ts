@@ -33,6 +33,9 @@ import {
   getNotesByExperiment,
   getNotesBySession,
   getActiveSession,
+  cascadeChainInvalidation,
+  incrementSubTypeFailure,
+  insertNote,
 } from '../db/queries.js';
 import { transition, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
@@ -41,7 +44,7 @@ import { extractStructuredData } from '../agents/parse.js';
 import { resolve as resolveExperiment } from '../resolve.js';
 import type { Experiment, Doubt } from '../types.js';
 import type { StructuredOutput } from '../agents/types.js';
-import { loadConfig, readFileOrEmpty, truncateContext, CONTEXT_LIMITS } from '../config.js';
+import { loadConfig, readFileOrEmpty, truncateContext, CONTEXT_LIMITS, getFlagValue } from '../config.js';
 import { parseMetricsOutput, compareMetrics } from '../metrics.js';
 import { autoCommit, handleDeadEndGit } from '../git.js';
 import * as fmt from '../output/format.js';
@@ -79,6 +82,28 @@ export async function resolveCmd(args: string[]): Promise<void> {
 
   const db = getDb(root);
   const exp = resolveExperimentArg(db, args);
+
+  // --reject: human override to force dead-end after verification review
+  if (args.includes('--reject')) {
+    transition(exp.status as ExperimentStatus, ExperimentStatus.RESOLVED);
+    const reason = getFlagValue(args, '--reason') ?? 'Human rejected after verification review';
+
+    db.transaction(() => {
+      insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug,
+        reason, `Human rejection: ${reason}`, exp.sub_type, 'procedural');
+      updateExperimentStatus(db, exp.id, 'resolved');
+      updateExperimentStatus(db, exp.id, 'dead_end');
+      if (exp.sub_type) {
+        incrementSubTypeFailure(db, exp.sub_type, exp.id, 'rejected');
+      }
+    })();
+
+    handleDeadEndGit(exp, root);
+    const weakened = cascadeChainInvalidation(db, exp.slug);
+    if (weakened > 0) fmt.warn(`Weakened chain: ${weakened} downstream experiment(s) depend on ${exp.slug}.`);
+    fmt.info(`Experiment ${exp.slug} dead-ended by human rejection: ${reason}`);
+    return;
+  }
 
   // Validate state: must be verified to resolve
   transition(exp.status as ExperimentStatus, ExperimentStatus.RESOLVED);
@@ -300,6 +325,8 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
       exp.sub_type, 'structural');
     adminTransitionAndPersist(db, exp.id, 'building' as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
     handleDeadEndGit(exp, root);
+    const weakened = cascadeChainInvalidation(db, exp.slug);
+    if (weakened > 0) fmt.warn(`Weakened chain: ${weakened} downstream experiment(s) depend on ${exp.slug}.`);
     fmt.info(`Builder abandoned ${exp.slug}: ${result.structured.abandon.reason}`);
     return;
   }
@@ -369,6 +396,8 @@ async function doBuild(db: ReturnType<typeof getDb>, exp: Experiment, root: stri
         exp.sub_type, 'structural');
       adminTransitionAndPersist(db, exp.id, 'building' as ExperimentStatus, ExperimentStatus.DEAD_END, 'revert');
       handleDeadEndGit(exp, root);
+      const weakenedTrunc = cascadeChainInvalidation(db, exp.slug);
+      if (weakenedTrunc > 0) fmt.warn(`Weakened chain: ${weakenedTrunc} downstream experiment(s) depend on ${exp.slug}.`);
       fmt.info(`Builder abandoned ${exp.slug} (recovered from truncation): ${recovery.data.abandon.reason}`);
 
     } else {

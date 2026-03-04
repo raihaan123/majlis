@@ -19,6 +19,7 @@ function makeExp(overrides: Partial<Experiment> = {}): Experiment {
     gate_rejection_reason: null,
     hypothesis_file: null,
     provenance: 'cycle',
+    chain_weakened_by: null,
     created_at: '2024-01-01',
     updated_at: '2024-01-01',
     ...overrides,
@@ -278,5 +279,31 @@ describe('ADMIN_TRANSITIONS bootstrap', () => {
 
   it('rejects gated → built', () => {
     assert.ok(!ADMIN_TRANSITIONS.bootstrap(ExperimentStatus.GATED, ExperimentStatus.BUILT));
+  });
+});
+
+describe('ADMIN_TRANSITIONS objective_reset', () => {
+  it('allows building → classified', () => {
+    assert.ok(ADMIN_TRANSITIONS.objective_reset(ExperimentStatus.BUILDING, ExperimentStatus.CLASSIFIED));
+  });
+
+  it('allows verified → classified', () => {
+    assert.ok(ADMIN_TRANSITIONS.objective_reset(ExperimentStatus.VERIFIED, ExperimentStatus.CLASSIFIED));
+  });
+
+  it('allows gated → classified', () => {
+    assert.ok(ADMIN_TRANSITIONS.objective_reset(ExperimentStatus.GATED, ExperimentStatus.CLASSIFIED));
+  });
+
+  it('rejects merged → classified (terminal)', () => {
+    assert.ok(!ADMIN_TRANSITIONS.objective_reset(ExperimentStatus.MERGED, ExperimentStatus.CLASSIFIED));
+  });
+
+  it('rejects dead_end → classified (terminal)', () => {
+    assert.ok(!ADMIN_TRANSITIONS.objective_reset(ExperimentStatus.DEAD_END, ExperimentStatus.CLASSIFIED));
+  });
+
+  it('rejects building → building (target must be classified)', () => {
+    assert.ok(!ADMIN_TRANSITIONS.objective_reset(ExperimentStatus.BUILDING, ExperimentStatus.BUILDING));
   });
 });

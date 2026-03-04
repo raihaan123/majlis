@@ -7,6 +7,7 @@ import {
   checkCircuitBreaker,
   insertDeadEnd,
   clearGateRejection,
+  cascadeChainInvalidation,
 } from '../db/queries.js';
 import { validNext, determineNextStep, isTerminal, transitionAndPersist, adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
@@ -77,6 +78,8 @@ async function runNextStep(
       exp.sub_type, 'procedural');
     adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'circuit_breaker');
     handleDeadEndGit(exp, root);
+    const weakened = cascadeChainInvalidation(db, exp.slug);
+    if (weakened > 0) fmt.warn(`Weakened chain: ${weakened} downstream experiment(s) depend on ${exp.slug}.`);
     fmt.warn('Experiment dead-ended. Triggering Maqasid Check (purpose audit).');
     await audit([config.project?.objective ?? '']);
     return;
@@ -92,6 +95,11 @@ async function runNextStep(
       fmt.info('Run `majlis next --override-gate` to proceed anyway, or `majlis revert` to abandon.');
       return;
     }
+  }
+
+  // Check chain weakening — warn but don't block
+  if (exp.chain_weakened_by) {
+    fmt.warn(`Experiment ${exp.slug} depends on ${exp.chain_weakened_by} (dead-ended). Chain integrity weakened.`);
   }
 
   // Check compression timer
@@ -115,6 +123,13 @@ async function runNextStep(
       next_step: nextStep,
       valid_transitions: valid,
     }));
+    return;
+  }
+
+  // Human verification pause — stop before auto-resolving when require_human_verify is on
+  if (nextStep === ExperimentStatus.RESOLVED && config.cycle.require_human_verify) {
+    fmt.info(`${exp.slug} verified. Human review required.`);
+    fmt.info('Run `majlis resolve` to proceed or `majlis resolve --reject` to dead-end.');
     return;
   }
 
@@ -151,6 +166,18 @@ async function runAutoLoop(
       break;
     }
 
+    // Auto-dead-end weakened experiments in auto mode (no human to review)
+    if (exp.chain_weakened_by) {
+      fmt.warn(`Experiment ${exp.slug} has weakened chain (depends on dead-ended ${exp.chain_weakened_by}). Auto-dead-ending.`);
+      insertDeadEnd(db, exp.id, exp.hypothesis ?? exp.slug,
+        `Upstream dependency ${exp.chain_weakened_by} is dead-ended`,
+        `Chain invalidated: depends on ${exp.chain_weakened_by}`,
+        exp.sub_type, 'procedural');
+      adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'circuit_breaker');
+      handleDeadEndGit(exp, root);
+      continue;
+    }
+
     if (isTerminal(exp.status as ExperimentStatus)) {
       fmt.success(`Experiment ${exp.slug} reached terminal state: ${exp.status}`);
       break;
@@ -165,6 +192,8 @@ async function runAutoLoop(
         exp.sub_type, 'procedural');
       adminTransitionAndPersist(db, exp.id, exp.status as ExperimentStatus, ExperimentStatus.DEAD_END, 'circuit_breaker');
       handleDeadEndGit(exp, root);
+      const weakened = cascadeChainInvalidation(db, exp.slug);
+      if (weakened > 0) fmt.warn(`Weakened chain: ${weakened} downstream experiment(s) depend on ${exp.slug}.`);
       await audit([config.project?.objective ?? '']);
       break;
     }
@@ -175,6 +204,12 @@ async function runAutoLoop(
     const expHasDoubts = dbHasDoubts(db, exp.id);
     const expHasChallenges = hasChallenges(db, exp.id);
     const nextStep = determineNextStep(exp, valid, expHasDoubts, expHasChallenges);
+
+    // Human verification pause — auto mode stops here for human review
+    if (nextStep === ExperimentStatus.RESOLVED && config.cycle.require_human_verify) {
+      fmt.info('Pausing at verified — human review required.');
+      break;
+    }
 
     fmt.info(`[${iteration}/${MAX_ITERATIONS}] ${exp.slug}: ${exp.status} → ${nextStep}`);
 

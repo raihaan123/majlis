@@ -12,6 +12,7 @@ import {
   listStructuralDeadEndsBySubType,
   storeHypothesisFile,
   updateExperimentStatus,
+  cascadeChainInvalidation,
 } from '../db/queries.js';
 import { adminTransitionAndPersist } from '../state/machine.js';
 import { ExperimentStatus } from '../state/types.js';
@@ -261,6 +262,9 @@ export async function revert(args: string[]): Promise<void> {
 
   // Commit any builder changes and checkout main/master
   handleDeadEndGit(exp, root);
+
+  const weakened = cascadeChainInvalidation(db, exp.slug);
+  if (weakened > 0) fmt.warn(`Weakened chain: ${weakened} downstream experiment(s) depend on ${exp.slug}.`);
 
   fmt.info(`Experiment ${exp.slug} reverted to dead-end.`);
   fmt.info(`Constraint: ${structuralConstraint.slice(0, 120)}${structuralConstraint.length > 120 ? '...' : ''}`);

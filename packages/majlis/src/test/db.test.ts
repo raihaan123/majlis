@@ -51,6 +51,15 @@ import {
   getJournalBySession,
   getRecentJournal,
   storeHypothesisFile,
+  findDependents,
+  setChainWeakened,
+  clearChainWeakened,
+  cascadeChainInvalidation,
+  insertObjectiveHistory,
+  getObjectiveHistory,
+  insertAuditProposal,
+  getPendingAuditProposal,
+  resolveAuditProposal,
 } from '../db/queries.js';
 import type Database from 'better-sqlite3';
 
@@ -61,22 +70,22 @@ beforeEach(() => {
 });
 
 describe('Migrations', () => {
-  it('creates all 16 tables', () => {
+  it('creates all 18 tables', () => {
     const tables = db.prepare(`
       SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
     `).all() as Array<{ name: string }>;
     const names = tables.map(t => t.name).sort();
     assert.deepEqual(names, [
-      'challenges', 'compressions', 'dead_ends', 'decisions', 'doubts',
-      'experiments', 'findings', 'journal_entries', 'metrics', 'notes',
-      'reframes', 'sessions', 'sub_type_failures', 'swarm_members',
-      'swarm_runs', 'verifications',
+      'audit_proposals', 'challenges', 'compressions', 'dead_ends', 'decisions',
+      'doubts', 'experiments', 'findings', 'journal_entries', 'metrics', 'notes',
+      'objective_history', 'reframes', 'sessions', 'sub_type_failures',
+      'swarm_members', 'swarm_runs', 'verifications',
     ]);
   });
 
-  it('sets user_version to 8', () => {
+  it('sets user_version to 9', () => {
     const version = db.pragma('user_version', { simple: true });
-    assert.equal(version, 8);
+    assert.equal(version, 9);
   });
 
   it('has builder_guidance column on experiments', () => {
@@ -101,7 +110,7 @@ describe('Migrations', () => {
   it('is idempotent', () => {
     const db2 = openTestDb();
     const version = db2.pragma('user_version', { simple: true });
-    assert.equal(version, 8);
+    assert.equal(version, 9);
   });
 });
 
@@ -640,5 +649,179 @@ describe('Compressor export includes notes and journal', () => {
     const result = exportForCompressor(db);
     assert.ok(result.includes('Journal'));
     assert.ok(result.includes('histogram is bimodal'));
+  });
+});
+
+// ── Migration 009 tests ─────────────────────────────────────
+
+describe('Migration 009: chain_weakened_by, objective_history, audit_proposals', () => {
+  it('has chain_weakened_by column on experiments', () => {
+    const cols = db.prepare('PRAGMA table_info(experiments)').all() as Array<{ name: string }>;
+    const colNames = cols.map(c => c.name);
+    assert.ok(colNames.includes('chain_weakened_by'));
+  });
+
+  it('creates objective_history table', () => {
+    const cols = db.prepare('PRAGMA table_info(objective_history)').all() as Array<{ name: string }>;
+    const colNames = cols.map(c => c.name);
+    assert.ok(colNames.includes('id'));
+    assert.ok(colNames.includes('objective_text'));
+    assert.ok(colNames.includes('previous_text'));
+    assert.ok(colNames.includes('reason'));
+    assert.ok(colNames.includes('source'));
+    assert.ok(colNames.includes('created_at'));
+  });
+
+  it('creates audit_proposals table', () => {
+    const cols = db.prepare('PRAGMA table_info(audit_proposals)').all() as Array<{ name: string }>;
+    const colNames = cols.map(c => c.name);
+    assert.ok(colNames.includes('id'));
+    assert.ok(colNames.includes('proposed_objective'));
+    assert.ok(colNames.includes('reason'));
+    assert.ok(colNames.includes('audit_output'));
+    assert.ok(colNames.includes('status'));
+    assert.ok(colNames.includes('resolved_at'));
+  });
+
+  it('enforces valid source values on objective_history', () => {
+    assert.throws(() => {
+      db.prepare(`INSERT INTO objective_history (objective_text, reason, source) VALUES (?, ?, ?)`).run('obj', 'reason', 'invalid');
+    });
+  });
+
+  it('enforces valid status values on audit_proposals', () => {
+    assert.throws(() => {
+      db.prepare(`INSERT INTO audit_proposals (proposed_objective, reason, status) VALUES (?, ?, ?)`).run('obj', 'reason', 'invalid');
+    });
+  });
+});
+
+// ── Chain Invalidation tests ────────────────────────────────
+
+describe('Chain Invalidation', () => {
+  it('findDependents finds direct dependents', () => {
+    const upstream = createExperiment(db, 'upstream', 'exp/001-up', 'upstream', null, null);
+    createExperiment(db, 'downstream', 'exp/002-down', 'downstream', null, null, 'upstream');
+
+    const deps = findDependents(db, 'upstream');
+    assert.equal(deps.length, 1);
+    assert.equal(deps[0].slug, 'downstream');
+  });
+
+  it('findDependents finds transitive dependents', () => {
+    createExperiment(db, 'a', 'exp/001-a', 'a', null, null);
+    createExperiment(db, 'b', 'exp/002-b', 'b', null, null, 'a');
+    createExperiment(db, 'c', 'exp/003-c', 'c', null, null, 'b');
+
+    const deps = findDependents(db, 'a');
+    assert.equal(deps.length, 2);
+    const slugs = deps.map(d => d.slug).sort();
+    assert.deepEqual(slugs, ['b', 'c']);
+  });
+
+  it('findDependents skips terminal experiments', () => {
+    createExperiment(db, 'up2', 'exp/001-up2', 'up', null, null);
+    const dead = createExperiment(db, 'dead-dep', 'exp/002-dead', 'dead', null, null, 'up2');
+    updateExperimentStatus(db, dead.id, 'dead_end');
+
+    const deps = findDependents(db, 'up2');
+    assert.equal(deps.length, 0);
+  });
+
+  it('setChainWeakened and clearChainWeakened work', () => {
+    const exp = createExperiment(db, 'chain-test', 'exp/001-ct', 'test', null, null);
+    assert.equal(exp.chain_weakened_by, null);
+
+    setChainWeakened(db, exp.id, 'some-slug');
+    const updated = getExperimentById(db, exp.id);
+    assert.equal(updated!.chain_weakened_by, 'some-slug');
+
+    clearChainWeakened(db, exp.id);
+    const cleared = getExperimentById(db, exp.id);
+    assert.equal(cleared!.chain_weakened_by, null);
+  });
+
+  it('cascadeChainInvalidation flags all downstream', () => {
+    createExperiment(db, 'root-exp', 'exp/001-root', 'root', null, null);
+    createExperiment(db, 'mid-exp', 'exp/002-mid', 'mid', null, null, 'root-exp');
+    createExperiment(db, 'leaf-exp', 'exp/003-leaf', 'leaf', null, null, 'mid-exp');
+
+    const count = cascadeChainInvalidation(db, 'root-exp');
+    assert.equal(count, 2);
+
+    const mid = getExperimentBySlug(db, 'mid-exp');
+    assert.equal(mid!.chain_weakened_by, 'root-exp');
+
+    const leaf = getExperimentBySlug(db, 'leaf-exp');
+    assert.equal(leaf!.chain_weakened_by, 'root-exp');
+  });
+
+  it('cascadeChainInvalidation returns 0 with no dependents', () => {
+    createExperiment(db, 'solo-exp', 'exp/001-solo', 'solo', null, null);
+    const count = cascadeChainInvalidation(db, 'solo-exp');
+    assert.equal(count, 0);
+  });
+});
+
+// ── Objective History tests ─────────────────────────────────
+
+describe('Objective History', () => {
+  it('inserts and retrieves objective history', () => {
+    insertObjectiveHistory(db, 'new objective', 'old objective', 'audit found misalignment', 'audit');
+    const history = getObjectiveHistory(db);
+    assert.equal(history.length, 1);
+    assert.equal(history[0].objective_text, 'new objective');
+    assert.equal(history[0].previous_text, 'old objective');
+    assert.equal(history[0].reason, 'audit found misalignment');
+    assert.equal(history[0].source, 'audit');
+  });
+
+  it('inserts manual objective history', () => {
+    insertObjectiveHistory(db, 'manual obj', null, 'initial setup', 'manual');
+    const history = getObjectiveHistory(db);
+    assert.equal(history[0].source, 'manual');
+    assert.equal(history[0].previous_text, null);
+  });
+});
+
+// ── Audit Proposals tests ───────────────────────────────────
+
+describe('Audit Proposals', () => {
+  it('inserts and retrieves a pending proposal', () => {
+    insertAuditProposal(db, 'better objective', 'current one is wrong', 'full audit output');
+    const pending = getPendingAuditProposal(db);
+    assert.ok(pending);
+    assert.equal(pending!.proposed_objective, 'better objective');
+    assert.equal(pending!.reason, 'current one is wrong');
+    assert.equal(pending!.status, 'pending');
+    assert.equal(pending!.audit_output, 'full audit output');
+  });
+
+  it('resolveAuditProposal accepts', () => {
+    insertAuditProposal(db, 'proposed', 'reason', null);
+    const pending = getPendingAuditProposal(db);
+    assert.ok(pending);
+    resolveAuditProposal(db, pending!.id, 'accepted');
+
+    const after = getPendingAuditProposal(db);
+    assert.equal(after, undefined);
+
+    const resolved = db.prepare('SELECT * FROM audit_proposals WHERE id = ?').get(pending!.id) as any;
+    assert.equal(resolved.status, 'accepted');
+    assert.ok(resolved.resolved_at);
+  });
+
+  it('resolveAuditProposal rejects', () => {
+    insertAuditProposal(db, 'bad proposal', 'bad reason', null);
+    const pending = getPendingAuditProposal(db);
+    resolveAuditProposal(db, pending!.id, 'rejected');
+
+    const after = getPendingAuditProposal(db);
+    assert.equal(after, undefined);
+  });
+
+  it('returns null when no pending proposals', () => {
+    const pending = getPendingAuditProposal(db);
+    assert.equal(pending, undefined);
   });
 });

@@ -240,6 +240,32 @@ const migrations: Migration[] = [
         CHECK(provenance IN ('cycle', 'catch-up', 'absorb'));
     `);
   },
+
+  // Migration 009: v8 → v9 — Chain invalidation, objective history, audit proposals
+  (db) => {
+    db.exec(`
+      ALTER TABLE experiments ADD COLUMN chain_weakened_by TEXT;
+
+      CREATE TABLE objective_history (
+        id INTEGER PRIMARY KEY,
+        objective_text TEXT NOT NULL,
+        previous_text TEXT,
+        reason TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'manual' CHECK(source IN ('manual', 'audit')),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE audit_proposals (
+        id INTEGER PRIMARY KEY,
+        proposed_objective TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        audit_output TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'rejected')),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME
+      );
+    `);
+  },
 ];
 
 /**
